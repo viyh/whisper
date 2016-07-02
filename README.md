@@ -26,7 +26,7 @@ The Docker image is available on Dockerhub:
 
 Run the docker image:
 
-        docker run --name whisper -p 5000:5000 -it whisper
+        docker run --name whisper -p 5000:5000 -it viyh/whisper
 
 
 ### AWS Credentials ###
