@@ -65,7 +65,7 @@ environment variables below.
 
 For example:
 
-        docker run --name whisper -p 5000:5000 -v $(pwd):/root/.aws -it whisper
+        docker run --name whisper -p 5000:5000 -v $(pwd):/root/.aws -it viyh/whisper
 
 Or with environment variables:
 
@@ -73,7 +73,7 @@ Or with environment variables:
             -e AWS_ACCESS_KEY_ID=YOUR_AWS_ACCESS_KEY_ID \
             -e AWS_SECRET_ACCESS_KEY=YOUR_AWS_SECRET_ACCESS_KEY \
             -e AWS_DEFAULT_REGION=us-east-1 \
-            -it whisper
+            -it viyh/whisper
 
 
 ### Environment Variables ###
