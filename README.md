@@ -17,14 +17,17 @@ date of expiration and creation.
 
 ## Installation ##
 
+
 ### Docker ###
 
 The Docker image is available on Dockerhub:
 
+[https://hub.docker.com/r/viyh/whisper/](https://hub.docker.com/r/viyh/whisper/)
 
 Run the docker image:
 
         docker run --name whisper -p 5000:5000 -it whisper
+
 
 ### AWS Credentials ###
 
@@ -71,6 +74,7 @@ Or with environment variables:
             -e AWS_SECRET_ACCESS_KEY=YOUR_AWS_SECRET_ACCESS_KEY \
             -e AWS_DEFAULT_REGION=us-east-1 \
             -it whisper
+
 
 ### Environment Variables ###
 
