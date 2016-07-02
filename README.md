@@ -86,7 +86,7 @@ Any of these defaults can be overridden when running the Docker container.
 * AWS_ACCESS_KEY_ID - Default (none)
 * AWS_SECRET_ACCESS_KEY - Default (none)
 * AWS_DEFAULT_REGION - Default: (none)
-* DEBUG - Default: (False)
+* DEBUG - Default: False
 
 ## Usage ##
 
