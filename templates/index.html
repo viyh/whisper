@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Whisper</title>
+        <link rel="icon" type="image/png" sizes="96x96" href="assets/favicon-96x96.png">
+        <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/css/bootstrap.min.css" integrity="sha384-1q8mTJOASx8j1Au+a5WDVnPi2lkFfwwEAa8hDDdjZlpLegxhjVME1fgjWPGmkzs7" crossorigin="anonymous">
+        <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/css/bootstrap-theme.min.css" integrity="sha384-fLW2N01lMqjakBkx3l/M9EahuwpSfeNvV63J5ezn3uZzapT0u7EYsXMjQV+0En5r" crossorigin="anonymous">
+        <link rel="stylesheet" href="assets/style.css">
+    </head>
+    <body>
+        <div class="container">
+            <div class="page-header">
+                <ul class="text-center list-inline">
+                    <li><img src="assets/logo.png"/></li>
+                    <li><h2 class="vcenter">Whisper v{{version}}</h2></li>
+                </ul>
+            </div>
+            <form id="form" class="form-horizontal" onsubmit="new_link(event);">
+                <label for="inputPassword" class="control-label">Password</label>
+                <input autocomplete="off" type="text" id="inputPassword" class="form-control" placeholder="Enter a password required to retrieve text" required>
+                <label for="inputText" class="control-label">Text</label>
+                <textarea class="form-control" rows="5" id="inputText" placeholder="Enter text here" required></textarea>
+                <label for="expiration" class="control-label">Expiration:</label>
+                <select class="form-control" id="expiration" required>
+                    <option>One time use</option>
+                    <option>1 hour</option>
+                    <option>1 day</option>
+                    <option>1 week</option>
+                </select>
+                <br />
+                <button class="btn btn-md btn-primary btn-block" type="submit">Get link</button>
+            </form>
+            <br />
+
+            <div id="copy-link-target" class="copy-link">
+                <div class="input-group">
+                    <input type="text" class="form-control" id="data_link" onClick="this.setSelectionRange(0, this.value.length);" readonly>
+                    <span class="input-group-button">
+                        <button class="btn clipbtn" data-clipboard-target="#data_link">
+                            <img class="clippy" src="assets/clippy.svg" width="13" alt="Copy to clipboard">
+                        </button>
+                    </span>
+                </div>
+            </div>
+
+        </div>
+        <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.3/jquery.min.js"></script>
+        <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/js/bootstrap.min.js" integrity="sha384-0mSbJDEHialfmuBBQP6A4Qrprq5OVfW37PRR3j5ELqxss1yVqOtnepnHVP9aJ7xS" crossorigin="anonymous"></script>
+        <script type="text/javascript" src="js/crypto-js.min.js"></script>
+        <script type="text/javascript" src="js/clipboard.min.js"></script>
+        <script type="text/javascript" src="js/whisper.js"></script>
+    </body>
+</html>
