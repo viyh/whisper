@@ -28,6 +28,9 @@ Run the docker image:
 
         docker run --name whisper -p 5000:5000 -it viyh/whisper
 
+### DynamoDB Table ###
+
+Create a DynamoDB table with a primary key of "id" (string). By default, this table should be named "whisper" but can be renamed if the `DYNAMO_TABLENAME` is set.
 
 ### AWS Credentials ###
 
@@ -113,7 +116,3 @@ Joe Richards <nospam-github@disconformity.net>
 ## Licence ##
 
 [MIT License](LICENSE)
-
-
-
-
