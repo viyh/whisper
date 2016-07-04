@@ -87,22 +87,14 @@ Or with environment variables:
 
 Any of these defaults can be overridden when running the Docker container.
 
-* WEB_URL - Default: http://localhost:5000
-The URL that links use.
-* WEB_PORT - Default: 5000
-The port for the Flash service.
-* SECRET_KEY - Default: random, you should set this.
-The secret key used when salting the password hashes specific to this container.
-* DYNAMO_TABLENAME - Default: whisper
-The name of the DynamoDB table.
-* AWS_ACCESS_KEY_ID - Default (none)
-The access key for AWS access.
-* AWS_SECRET_ACCESS_KEY - Default (none)
-The secret key for AWS access.
-* AWS_DEFAULT_REGION - Default: (none)
-The region with the DynamoDB table.
-* DEBUG - Default: False
-Turn on debugging.
+* WEB_URL - Default: http://localhost:5000 - The URL that links use.
+* WEB_PORT - Default: 5000 - The port for the Flash service.
+* SECRET_KEY - Default: random, you should set this. - The secret key used when salting the password hashes specific to this container.
+* DYNAMO_TABLENAME - Default: whisper - The name of the DynamoDB table.
+* AWS_ACCESS_KEY_ID - Default (none) - The access key for AWS access.
+* AWS_SECRET_ACCESS_KEY - Default (none) - The secret key for AWS access.
+* AWS_DEFAULT_REGION - Default: (none) - The region with the DynamoDB table.
+* DEBUG - Default: False - Turn on debugging.
 
 ## Usage ##
 
