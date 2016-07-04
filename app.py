@@ -7,7 +7,9 @@ that is too sensitive to send via email or other plaintext methods."""
 
 from __future__ import print_function
 from random import random
-from hashlib import sha1
+from hashlib import sha1, pbkdf2_hmac
+import binascii
+import uuid
 import time
 import os
 import decimal
@@ -75,6 +77,23 @@ def delete_expired():
             table.delete_item(Key={'id': item['id']})
     return True
 
+def generate_hmac256(text, salt):
+    """Generate HMAC256 hash"""
+    salted_hmac = pbkdf2_hmac('sha256', bytes(text.encode('utf-8')), bytes(salt.encode('utf-8')), 100000)
+    return binascii.hexlify(salted_hmac).decode("utf-8")
+
+def get_ssha(sha):
+    """Get a salted SHA from a regular SHA"""
+    salt = uuid.uuid4().hex
+    salted_hash = generate_hmac256(sha + secret_key, salt)
+    return(salt + salted_hash)
+
+def check_sha(sha, ssha):
+    """Check if a regular SHA matches the stored salted SHA"""
+    salt = ssha[:32]
+    salted_hash = generate_hmac256(sha + secret_key, salt)
+    return salted_hash == ssha[32:]
+
 @app.route('/')
 def index():
     """Index page."""
@@ -104,15 +123,17 @@ def get_data(data_id):
     else:
         return render_template('show.html', version=__version__, data_id=data_id)
 
-@app.route('/whisper/api/v1.0/get/<data_id>', methods=['POST', 'GET', 'OPTIONS'])
+@app.route('/whisper/api/v1.0/get/<data_id>', methods=['POST', 'OPTIONS'])
 def api_get(data_id):
     """Retrieve encrypted data."""
     delete_expired()
-    response = table.get_item(Key={'id': data_id})
-    if not response or not 'Item' in response:
+    dynamo_response = table.get_item(Key={'id': data_id})
+    if not request.json or not dynamo_response or not 'Item' in dynamo_response:
         return jsonify({'result': 'No such id.'})
-    item = response['Item']
-    if one_time_item(item):
+    item = dynamo_response['Item']
+    if not 'hash' in item or not check_sha(request.json['hash'], item['hash']):
+        return jsonify({'result': "No such id."})
+    elif one_time_item(item):
         table.delete_item(Key={'id': data_id})
     elif expired_item(item):
         table.delete_item(Key={'id': data_id})
@@ -122,14 +143,16 @@ def api_get(data_id):
 @app.route('/whisper/api/v1.0/new', methods=['POST', 'OPTIONS'])
 def api_new():
     """Create new encrypted item."""
-    if not request.json or not 'encrypted_data' in request.json or not 'expiration' in request.json:
+    required = ['encrypted_data', 'expiration', 'hash']
+    if not request.json or not all(key in request.json for key in required):
         return 'False'
     random_string = sha1(str(random()).encode('utf-8')).hexdigest()
     new_data = {
         'id': random_string,
         'encrypted_data': request.json['encrypted_data'],
         'created_date': int(time.time()),
-        'expired_date': get_expired_date(request.json['expiration'])
+        'expired_date': get_expired_date(request.json['expiration']),
+        'hash': get_ssha(request.json['hash'])
     }
     table.put_item(Item=new_data)
     return jsonify(new_data)
@@ -143,6 +166,7 @@ if __name__ == '__main__':
     dynamodb_tablename = os.getenv('DYNAMODB_TABLENAME', 'whisper')
     web_url = os.getenv('WEB_URL', 'http://localhost:5000')
     web_port = int(os.getenv('WEB_PORT', '5000'))
+    secret_key = os.getenv('SECRET_KEY', 'aPdbh;/5G^|n43[Jpb~">c*|)xh8L0')
     debug = True if os.getenv('DEBUG', 'False') in ['True', 'true', 'y' 'yes' 'on'] else False
 
     dynamodb = boto3.resource('dynamodb')

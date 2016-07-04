@@ -10,10 +10,15 @@ function decrypt(ciphertext, password) {
     return CryptoJS.AES.decrypt(ciphertext, password);
 }
 
+function get_sha256(password) {
+    return CryptoJS.SHA256(password)
+}
+
 function new_link(event) {
     event.preventDefault();
     var plaintext = document.getElementById('inputText').value
     var password = document.getElementById('inputPassword').value;
+    var sha256 = get_sha256(password);
     var expiration = document.getElementById('expiration').value;
     var encrypted = encrypt(plaintext, password);
     function success (response) {
@@ -24,7 +29,7 @@ function new_link(event) {
         document.getElementById('data_link').value = 'Could not create link.';
         return false;
     }
-    var api_data = {'encrypted_data': encrypted.toString(), 'expiration': expiration};
+    var api_data = {'encrypted_data': encrypted.toString(), 'hash': sha256.toString(), 'expiration': expiration};
     api_call(web_url + api_path + 'new', "POST", api_data, success, failure);
 }
 
@@ -32,6 +37,7 @@ function get_data(event) {
     event.preventDefault();
     var password = document.getElementById('inputPassword').value;
     var data_id = document.getElementById('data_id').value;
+    var sha256 = get_sha256(password);
     function failure (response) {
         document.getElementById('decrypted_text').value = "No such id.";
         return false;
@@ -45,7 +51,8 @@ function get_data(event) {
             document.getElementById('decrypted_text').value = decrypted.toString(CryptoJS.enc.Utf8);
         }
     }
-    api_call(web_url + api_path + 'get/' + data_id, "GET", null, success, failure);
+    var api_data = {'hash': sha256.toString()};
+    api_call(web_url + api_path + 'get/' + data_id, "POST", api_data, success, failure);
 }
 
 function api_call(url, type, api_data, success_callback, failure_callback) {

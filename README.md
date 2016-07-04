@@ -12,8 +12,8 @@ be deleted at a maximum of 30 days regardless of if it was retrieved. DynamoDB
 is used to store the data.
 
 All encryption is done client-side, so no data is transmitted in plaintext. The
-only data stored in the DynamoDB table is the encrypted text, ID number, and
-date of expiration and creation.
+only data stored in the DynamoDB table is the encrypted text, salted SHA256 hash,
+ID number, and date of expiration and creation.
 
 ## Installation ##
 
@@ -26,7 +26,10 @@ The Docker image is available on Dockerhub:
 
 Run the docker image:
 
-        docker run --name whisper -p 5000:5000 -it viyh/whisper
+        docker run --name whisper \
+            -p 5000:5000 \
+            -e SECRET_KEY=thi\$1smyC00L5ecr3t \
+            -it viyh/whisper
 
 ### DynamoDB Table ###
 
@@ -76,6 +79,7 @@ Or with environment variables:
             -e AWS_ACCESS_KEY_ID=YOUR_AWS_ACCESS_KEY_ID \
             -e AWS_SECRET_ACCESS_KEY=YOUR_AWS_SECRET_ACCESS_KEY \
             -e AWS_DEFAULT_REGION=us-east-1 \
+            -e SECRET_KEY=thi\$1smyC00L5ecr3t \
             -it viyh/whisper
 
 
@@ -84,12 +88,21 @@ Or with environment variables:
 Any of these defaults can be overridden when running the Docker container.
 
 * WEB_URL - Default: http://localhost:5000
+The URL that links use.
 * WEB_PORT - Default: 5000
+The port for the Flash service.
+* SECRET_KEY - Default: random, you should set this.
+The secret key used when salting the password hashes specific to this container.
 * DYNAMO_TABLENAME - Default: whisper
+The name of the DynamoDB table.
 * AWS_ACCESS_KEY_ID - Default (none)
+The access key for AWS access.
 * AWS_SECRET_ACCESS_KEY - Default (none)
+The secret key for AWS access.
 * AWS_DEFAULT_REGION - Default: (none)
+The region with the DynamoDB table.
 * DEBUG - Default: False
+Turn on debugging.
 
 ## Usage ##
 
