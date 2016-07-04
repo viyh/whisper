@@ -15,6 +15,7 @@ import os
 import decimal
 
 import boto3
+from botocore.exceptions import ClientError
 
 import flask.json
 from flask import Flask, request, jsonify, \
@@ -22,7 +23,7 @@ from flask import Flask, request, jsonify, \
 from werkzeug.routing import BaseConverter
 from flask_cors import CORS
 
-__version__ = '0.0.3'
+__version__ = '0.0.4'
 
 class MyJSONEncoder(flask.json.JSONEncoder):
     """JSON encoder for DynamoDB items to deal with decimal objects."""
@@ -39,7 +40,6 @@ class RegexConverter(BaseConverter):
 
 app = Flask(__name__)
 CORS(app)
-
 app.url_map.converters['regex'] = RegexConverter
 app.json_encoder = MyJSONEncoder
 
@@ -79,20 +79,63 @@ def delete_expired():
 
 def generate_hmac256(text, salt):
     """Generate HMAC256 hash"""
-    salted_hmac = pbkdf2_hmac('sha256', bytes(text.encode('utf-8')), bytes(salt.encode('utf-8')), 100000)
-    return binascii.hexlify(salted_hmac).decode("utf-8")
+    text_bytes = bytes(text.encode('utf-8'))
+    salt_bytes = bytes(salt.encode('utf-8'))
+    salted_hmac = pbkdf2_hmac('sha256', text_bytes, salt_bytes, 100000)
+    return binascii.hexlify(salted_hmac).decode('utf-8')
 
 def get_ssha(sha):
     """Get a salted SHA from a regular SHA"""
     salt = uuid.uuid4().hex
     salted_hash = generate_hmac256(sha + secret_key, salt)
-    return(salt + salted_hash)
+    return salt + salted_hash
 
 def check_sha(sha, ssha):
     """Check if a regular SHA matches the stored salted SHA"""
     salt = ssha[:32]
     salted_hash = generate_hmac256(sha + secret_key, salt)
     return salted_hash == ssha[32:]
+
+def check_item(item):
+    """Check that the item has all the required keys"""
+    keys = ['id', 'encrypted_data', 'created_date', 'expired_date', 'hash']
+    return all(key in item for key in keys)
+
+def get_dynamodb_item(data_id):
+    """Retrieve an existing item"""
+    try:
+        dynamo_response = table.get_item(Key={'id': data_id})
+        item = dynamo_response['Item']
+        if not check_item(item):
+            item = False
+    except (ClientError, KeyError):
+        item = False
+    return item
+
+def check_get_request():
+    """Check that the request for an existing item has the necessary data"""
+    return request.json and 'hash' in request.json
+
+def check_new_request():
+    """Check that the request for a new item has necessary data"""
+    keys = ['encrypted_data', 'expiration', 'hash']
+    return request.json or not all(key in request.json for key in keys)
+
+def get_data_id():
+    """Create a new item ID"""
+    return sha1(str(random()).encode('utf-8')).hexdigest()
+
+def create_new_item():
+    """Create new item in DynamoDB."""
+    new_data = {
+        'id': get_data_id(),
+        'encrypted_data': request.json['encrypted_data'],
+        'created_date': int(time.time()),
+        'expired_date': get_expired_date(request.json['expiration']),
+        'hash': get_ssha(request.json['hash'])
+    }
+    table.put_item(Item=new_data)
+    return new_data
 
 @app.route('/')
 def index():
@@ -127,34 +170,19 @@ def get_data(data_id):
 def api_get(data_id):
     """Retrieve encrypted data."""
     delete_expired()
-    dynamo_response = table.get_item(Key={'id': data_id})
-    if not request.json or not dynamo_response or not 'Item' in dynamo_response:
+    item = get_dynamodb_item(data_id)
+    if not check_get_request() or not item or not check_sha(request.json['hash'], item['hash']):
         return jsonify({'result': 'No such id.'})
-    item = dynamo_response['Item']
-    if not 'hash' in item or not check_sha(request.json['hash'], item['hash']):
-        return jsonify({'result': "No such id."})
     elif one_time_item(item):
         table.delete_item(Key={'id': data_id})
-    elif expired_item(item):
-        table.delete_item(Key={'id': data_id})
-        return jsonify({'result': "No such id."})
     return jsonify(item)
 
 @app.route('/whisper/api/v1.0/new', methods=['POST', 'OPTIONS'])
 def api_new():
     """Create new encrypted item."""
-    required = ['encrypted_data', 'expiration', 'hash']
-    if not request.json or not all(key in request.json for key in required):
-        return 'False'
-    random_string = sha1(str(random()).encode('utf-8')).hexdigest()
-    new_data = {
-        'id': random_string,
-        'encrypted_data': request.json['encrypted_data'],
-        'created_date': int(time.time()),
-        'expired_date': get_expired_date(request.json['expiration']),
-        'hash': get_ssha(request.json['hash'])
-    }
-    table.put_item(Item=new_data)
+    if not check_new_request():
+        return jsonify({'result': 'Bad request.'})
+    new_data = create_new_item()
     return jsonify(new_data)
 
 @app.route('/<path:dummy>')
