@@ -16,9 +16,9 @@ function get_sha256(password) {
 
 function new_link(event) {
     event.preventDefault();
-    var plaintext = document.getElementById('inputText').value
     var password = document.getElementById('inputPassword').value;
     var sha256 = get_sha256(password);
+    var plaintext = document.getElementById('inputText').value
     var expiration = document.getElementById('expiration').value;
     var encrypted = encrypt(plaintext, password);
     function success (response) {
@@ -36,8 +36,8 @@ function new_link(event) {
 function get_data(event) {
     event.preventDefault();
     var password = document.getElementById('inputPassword').value;
-    var data_id = document.getElementById('data_id').value;
     var sha256 = get_sha256(password);
+    var data_id = document.getElementById('data_id').value;
     function failure (response) {
         document.getElementById('decrypted_text').value = "No such id.";
         return false;
