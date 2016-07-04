@@ -8,6 +8,10 @@
     float: none;
 }
 
+.github-link {
+    padding: 5px;
+}
+
 .input-group input#data_link {
     text-align: center;
 }
