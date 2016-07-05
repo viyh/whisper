@@ -9,6 +9,6 @@ ADD ./app /usr/src/app/
 
 RUN pip install --no-cache-dir -r requirements.txt
 
-EXPOSE ${WEB_PORT}
+EXPOSE $WEB_PORT
 
-CMD [ "gunicorn", "-m 4", "-b 0.0.0.0:${WEB_PORT}", "app:app" ]
+CMD [ "sh", "-c", "gunicorn -m 4 -b 0.0.0.0:$WEB_PORT app:app" ]
