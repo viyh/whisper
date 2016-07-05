@@ -190,15 +190,15 @@ def fallback(dummy):
     """Redirect to index for all other requests."""
     return redirect(url_for('index'))
 
+dynamodb_tablename = os.getenv('DYNAMODB_TABLENAME', 'whisper')
+web_url = os.getenv('WEB_URL', 'http://localhost:8000')
+secret_key = os.getenv('SECRET_KEY', 'aPdbh;/5G^|n43[Jpb~">c*|)xh8L0')
+debug = True if os.getenv('DEBUG', 'False') in ['True', 'true', 'y' 'yes' 'on'] else False
+
+dynamodb = boto3.resource('dynamodb')
+table = dynamodb.Table(dynamodb_tablename)
+if debug:
+    print(table.creation_date_time)
+
 if __name__ == '__main__':
-    dynamodb_tablename = os.getenv('DYNAMODB_TABLENAME', 'whisper')
-    web_url = os.getenv('WEB_URL', 'http://localhost:8000')
-    secret_key = os.getenv('SECRET_KEY', 'aPdbh;/5G^|n43[Jpb~">c*|)xh8L0')
-    debug = True if os.getenv('DEBUG', 'False') in ['True', 'true', 'y' 'yes' 'on'] else False
-
-    dynamodb = boto3.resource('dynamodb')
-    table = dynamodb.Table(dynamodb_tablename)
-    if debug:
-        print(table.creation_date_time)
-
     app.run(host='0.0.0.0', port=5000, debug=debug)
