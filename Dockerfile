@@ -18,4 +18,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 EXPOSE $WEB_PORT
 
-CMD sh -c "gunicorn -m 4 -D -b unix:/tmp/gunicorn.sock app:app" && envsubst "\$WEB_PORT" < /tmp/nginx.conf > /etc/nginx/nginx.conf && /usr/sbin/nginx -c /etc/nginx/nginx.conf
+CMD sh -c "gunicorn -m 4 --error-logfile /tmp/gunicorn.error.log --access-logfile /tmp/gunicorn.access.log -D -b unix:/tmp/gunicorn.sock app:app" && envsubst "\$WEB_PORT" < /tmp/nginx.conf > /etc/nginx/nginx.conf && /usr/sbin/nginx -c /etc/nginx/nginx.conf
