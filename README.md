@@ -27,7 +27,7 @@ The Docker image is available on Dockerhub:
 Run the docker image:
 
         docker run --name whisper \
-            -p 5000:5000 \
+            -p 8000:8000 \
             -e SECRET_KEY=thi\$1smyC00L5ecr3t \
             -it viyh/whisper
 
@@ -71,11 +71,11 @@ environment variables below.
 
 For example:
 
-        docker run --name whisper -p 5000:5000 -v $(pwd):/root/.aws -it viyh/whisper
+        docker run --name whisper -p 8000:8000 -v $(pwd):/root/.aws -it viyh/whisper
 
 Or with environment variables:
 
-        docker run --name whisper -p 5000:5000 \
+        docker run --name whisper -p 8000:8000 \
             -e AWS_ACCESS_KEY_ID=YOUR_AWS_ACCESS_KEY_ID \
             -e AWS_SECRET_ACCESS_KEY=YOUR_AWS_SECRET_ACCESS_KEY \
             -e AWS_DEFAULT_REGION=us-east-1 \
@@ -87,8 +87,8 @@ Or with environment variables:
 
 Any of these defaults can be overridden when running the Docker container.
 
-* WEB_URL - Default: http://localhost:5000 - The URL that links use.
-* WEB_PORT - Default: 5000 - The port for the Flash service.
+* WEB_URL - Default: http://localhost:8000 - The URL that links use.
+* WEB_PORT - Default: 8000 - The port for the WSGI service.
 * SECRET_KEY - Default: random, you should set this. - The secret key used when salting the password hashes specific to this container.
 * DYNAMO_TABLENAME - Default: whisper - The name of the DynamoDB table.
 * AWS_ACCESS_KEY_ID - Default (none) - The access key for AWS access.
@@ -98,7 +98,7 @@ Any of these defaults can be overridden when running the Docker container.
 
 ## Usage ##
 
-Browse to the WEB_URL, such as [http://localhost:5000](http://localhost:5000) by default.
+Browse to the WEB_URL, such as [http://localhost:8000](http://localhost:8000) by default.
 
 Enter the text data to be secured and a password used to encrypt it. After the
 "Get link" button is clicked, a URL is created which can be sent via any plaintext
