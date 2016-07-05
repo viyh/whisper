@@ -192,8 +192,7 @@ def fallback(dummy):
 
 if __name__ == '__main__':
     dynamodb_tablename = os.getenv('DYNAMODB_TABLENAME', 'whisper')
-    web_url = os.getenv('WEB_URL', 'http://localhost:5000')
-    web_port = int(os.getenv('WEB_PORT', '5000'))
+    web_url = os.getenv('WEB_URL', 'http://localhost:8000')
     secret_key = os.getenv('SECRET_KEY', 'aPdbh;/5G^|n43[Jpb~">c*|)xh8L0')
     debug = True if os.getenv('DEBUG', 'False') in ['True', 'true', 'y' 'yes' 'on'] else False
 
@@ -202,4 +201,4 @@ if __name__ == '__main__':
     if debug:
         print(table.creation_date_time)
 
-    app.run(host='0.0.0.0', port=web_port, debug=debug)
+    app.run(host='0.0.0.0', port=5000, debug=debug)
