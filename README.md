@@ -4,7 +4,7 @@ Whisper is used to securely distribute credentials that are too sensitive to sen
 
 ## Overview ##
 
-The data is entered and encryted with AES using a supplied password. A link is
+The data is entered and encrypted with AES using a supplied password. A link is
 created and can be sent to the other party, and the password can be provided to
 them by other means such as instant messaging or a phone call. The data can be
 set to delete after one viewing, one hour, one day, or one week. Any data will
