@@ -1,4 +1,4 @@
-FROM python:3.4-alpine
+FROM python:3.7-alpine
 
 ENV WEB_PORT 8000
 
@@ -18,4 +18,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 EXPOSE $WEB_PORT
 
-CMD sh -c "gunicorn -m 4 --error-logfile /tmp/gunicorn.error.log --access-logfile /tmp/gunicorn.access.log -D -b unix:/tmp/gunicorn.sock app:app" && envsubst "\$WEB_PORT" < /tmp/nginx.conf > /etc/nginx/nginx.conf && /usr/sbin/nginx -c /etc/nginx/nginx.conf
+CMD sh -c "gunicorn -m 4 --error-logfile /tmp/gunicorn.error.log --access-logfile /tmp/gunicorn.access.log -D -b unix:/tmp/gunicorn.sock app:app" && envsubst "\$WEB_PORT" < /tmp/nginx.conf > /etc/nginx/nginx.conf && /usr/sbin/nginx -c /etc/nginx/nginx.conf && tail -F /tmp/gunicorn.error.log /tmp/nginx.error.log /tmp/nginx.access.log
