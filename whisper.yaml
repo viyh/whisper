@@ -1,0 +1,542 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Whisper ECS stack template
+
+Parameters:
+  Prefix:
+    Default: disconformity
+    Description: Internal prefix name
+    Type: String
+  Scope:
+    Default: prod
+    Description: Stack scope
+    Type: String
+  Project:
+    Default: whisper
+    Description: Stack project
+    Type: String
+  WorkStream:
+    Default: rel
+    Description: Stack workstream
+    Type: String
+  Environment:
+    Default: p
+    Description: Stack environment
+    Type: String
+  CostCenter:
+    Default: Shared
+    Description: Stack costcenter
+    Type: String
+  TemplateVersion:
+    Default: 1.0.0.20191023140633
+    Description: Template version number, typically SemVer + YYmmddHHMMSS
+    Type: String
+  DomainSuffix:
+    Default: disconformity.net
+    Description: DNS domain name suffix (must exist as a Route53 zone)
+    Type: String
+  InstanceType:
+    Type: String
+    Default: t3.nano
+    Description: Size of ECS nodes
+  KeyName:
+    Default: Launch User
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the ECS instances
+    Type: AWS::EC2::KeyPair::KeyName
+  AMI:
+    Default: /aws/service/ecs/optimized-ami/amazon-linux/recommended/image_id
+    Description: AMI ID
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+  ClusterSize:
+    Type: Number
+    Default: 1
+    Description: Number of ECS nodes to deploy
+  ServiceDesiredCount:
+    Type: Number
+    Default: 1
+    Description: Number of tasks to create for the service (usually this is the same as the number of nodes in ClusterSize)
+  DockerRepository:
+    Type: String
+    Default: viyh/whisper
+  DockerTag:
+    Type: String
+    Default: latest
+  HostName:
+    Type: String
+    Default: whisper
+    Description: Hostname for DNS (will be suffixed with the DomainSuffix, i.e. <HostName>.<DomainSuffix>)
+  DynamoTableName:
+    Type: String
+    Default: whisper
+    Description: Name for the DynamoDB table
+  VPCId:
+    Type: AWS::EC2::VPC::Id
+    Default: vpc-a1b2c3d4
+    Description: VPC to deploy infrastructure into
+  ECSSubnets:
+    Type: List<AWS::EC2::Subnet::Id>
+    Default: subnet-a1b2c3d4,subnet-4d3c2b1a
+    Description: Subnets for the ECS hosts in different zones, typically private subnets (without an internet gateway)
+  ALBSubnets:
+    Type: List<AWS::EC2::Subnet::Id>
+    Default: subnet-a1b2c3d4,subnet-4d3c2b1a
+    Description: Subnets for the ALB interfaces in different zones, typically public subnets (with an internet gateway)
+  AllowedCIDRBlock:
+    Type: String
+    Default: 0.0.0.0/0
+    Description: CIDR block of IP range allowed to access the load balanced service.
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+    - Label:
+        default: Whisper Parameters
+      Parameters:
+      - HostName
+      - DynamoTableName
+      - DockerRepository
+      - DockerTag
+    - Label:
+        default: Innate Parameters
+      Parameters:
+      - Prefix
+      - Scope
+      - Project
+      - WorkStream
+      - Environment
+      - CostCenter
+      - TemplateVersion
+      - DomainSuffix
+    - Label:
+        default: ECS Cluster Parameters
+      Parameters:
+      - InstanceType
+      - ClusterSize
+      - ServiceDesiredCount
+      - KeyName
+
+
+Resources:
+
+###
+### EC2 IAM Role
+###
+
+  EC2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AWS::StackName}-EC2Role
+      AssumeRolePolicyDocument:
+        Statement:
+        - Action:
+          - sts:AssumeRole
+          Effect: Allow
+          Principal:
+            Service:
+            - ec2.amazonaws.com
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
+      Path: /
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles:
+        - !Ref EC2Role
+
+###
+### Security Groups
+###
+
+  pubSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref VPCId
+      GroupDescription: !Sub ${AWS::StackName}-pub
+      SecurityGroupIngress:
+      - CidrIp: !Ref AllowedCIDRBlock
+        IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+      - CidrIp: !Ref AllowedCIDRBlock
+        IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+      Tags:
+      - Key: Name
+        Value: !Sub ${AWS::StackName}-pub
+      - Key: Tier
+        Value: pub
+      - Key: Project
+        Value: !Ref Project
+      - Key: WorkStream
+        Value: !Ref WorkStream
+      - Key: Environment
+        Value: !Ref Environment
+      - Key: Scope
+        Value: !Ref Scope
+
+  appSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref VPCId
+      GroupDescription: !Sub ${AWS::StackName}-app
+      SecurityGroupIngress:
+      - SourceSecurityGroupId: !Ref pubSecurityGroup
+        IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+      - SourceSecurityGroupId: !Ref pubSecurityGroup
+        IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+      - SourceSecurityGroupId: !Ref pubSecurityGroup
+        IpProtocol: tcp
+        FromPort: 8080
+        ToPort: 8080
+      - SourceSecurityGroupId: !Ref pubSecurityGroup
+        IpProtocol: tcp
+        FromPort: 32768
+        ToPort: 61000
+      Tags:
+      - Key: Name
+        Value: !Sub ${AWS::StackName}-app
+      - Key: Tier
+        Value: app
+      - Key: Project
+        Value: !Ref Project
+      - Key: WorkStream
+        Value: !Ref WorkStream
+      - Key: Environment
+        Value: !Ref Environment
+      - Key: Scope
+        Value: !Ref Scope
+
+###
+### ECS Cluster
+###
+
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub ${AWS::StackName}-app
+
+  AutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      VPCZoneIdentifier: !Ref ECSSubnets
+      LaunchConfigurationName: !Ref LaunchConfiguration
+      MinSize: !Ref ClusterSize
+      MaxSize: !Ref ClusterSize
+      DesiredCapacity: !Ref ClusterSize
+      Tags:
+      - Key: Tier
+        PropagateAtLaunch: 'true'
+        Value: app
+      - Key: Module
+        PropagateAtLaunch: 'true'
+        Value: app
+      - Key: Prefix
+        PropagateAtLaunch: 'true'
+        Value: !Ref Prefix
+      - Key: Scope
+        PropagateAtLaunch: 'true'
+        Value: !Ref Scope
+      - Key: Environment
+        PropagateAtLaunch: 'true'
+        Value: !Ref Environment
+      - Key: Project
+        PropagateAtLaunch: 'true'
+        Value: !Ref Project
+      - Key: WorkStream
+        PropagateAtLaunch: 'true'
+        Value: !Ref WorkStream
+      - Key: CostCenter
+        PropagateAtLaunch: 'true'
+        Value: !Ref CostCenter
+      - Key: Name
+        PropagateAtLaunch: 'true'
+        Value: !Sub AS-${AWS::StackName}-app
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT15M
+    UpdatePolicy:
+      AutoScalingRollingUpdate:
+        MinInstancesInService: 0
+        MaxBatchSize: 1
+        PauseTime: PT15M
+        WaitOnResourceSignals: true
+
+  LaunchConfiguration:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Metadata:
+      AWS::CloudFormation::Init:
+        config:
+          commands:
+            01_add_instance_to_cluster:
+                command: !Sub echo ECS_CLUSTER=${Cluster} > /etc/ecs/ecs.config
+          files:
+            /etc/cfn/cfn-hup.conf:
+              mode: 000400
+              owner: root
+              group: root
+              content: !Sub |
+                [main]
+                stack=${AWS::StackId}
+                region=${AWS::Region}
+            /etc/cfn/hooks.d/cfn-auto-reloader.conf:
+              content: !Sub |
+                [cfn-auto-reloader-hook]
+                triggers=post.update
+                path=Resources.ContainerInstances.Metadata.AWS::CloudFormation::Init
+                action=/opt/aws/bin/cfn-init -v --region ${AWS::Region} --stack ${AWS::StackName} --resource LaunchConfiguration
+          services:
+            sysvinit:
+              cfn-hup:
+                enabled: true
+                ensureRunning: true
+                files:
+                  - /etc/cfn/cfn-hup.conf
+                  - /etc/cfn/hooks.d/cfn-auto-reloader.conf
+    Properties:
+      ImageId: !Ref AMI
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref InstanceProfile
+      KeyName: !Ref KeyName
+      SecurityGroups:
+      - !Ref appSecurityGroup
+      UserData:
+        "Fn::Base64": !Sub |
+          #!/bin/bash
+          yum -y update && yum -y upgrade
+          yum install -y aws-cfn-bootstrap
+          /opt/aws/bin/cfn-init -v --region ${AWS::Region} --stack ${AWS::StackName} --resource LaunchConfiguration
+          /opt/aws/bin/cfn-signal -e $? --region ${AWS::Region} --stack ${AWS::StackName} --resource AutoScalingGroup
+
+  ECSServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AWS::StackName}-ECSServiceRole
+      AssumeRolePolicyDocument:
+        Statement:
+        - Action:
+          - sts:AssumeRole
+          Effect: Allow
+          Principal:
+            Service:
+            - ecs.amazonaws.com
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceRole
+      Path: /
+
+  ECSTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AWS::StackName}-ECSTaskRole
+      AssumeRolePolicyDocument:
+        Statement:
+        - Action:
+          - sts:AssumeRole
+          Effect: Allow
+          Principal:
+            Service:
+            - ecs-tasks.amazonaws.com
+      Path: /
+      Policies:
+      - PolicyName: !Sub ${AWS::StackName}-ECSTaskRole
+        PolicyDocument:
+          Statement:
+          - Action:
+            - logs:*
+            Effect: Allow
+            Resource: arn:aws:logs:us-east-1:*:*
+          - Action:
+            - dynamodb:BatchGetItem
+            - dynamodb:BatchWriteItem
+            - dynamodb:DeleteItem
+            - dynamodb:DescribeTable
+            - dynamodb:GetItem
+            - dynamodb:PutItem
+            - dynamodb:Query
+            - dynamodb:Scan
+            - dynamodb:UpdateItem
+            Effect: Allow
+            Resource: !GetAtt DynamoDBTable.Arn
+
+  Service:
+    Type: AWS::ECS::Service
+    DependsOn:
+    - LoadBalancerListenerHTTPS
+    - TargetGroup
+    Properties:
+      Cluster: !Ref Cluster
+      Role: !Ref ECSServiceRole
+      DesiredCount: !Ref ServiceDesiredCount
+      ServiceName: !Ref AWS::StackName
+      TaskDefinition: !Ref TaskDefinition
+      LoadBalancers:
+        - ContainerName: !Sub ${AWS::StackName}-app
+          ContainerPort: 80
+          TargetGroupArn: !Ref TargetGroup
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      TaskRoleArn: !Ref ECSTaskRole
+      Family: !Sub ${AWS::StackName}-app
+      ContainerDefinitions:
+      - Name: !Sub ${AWS::StackName}-app
+        Image: !Sub ${DockerRepository}:${DockerTag}
+        Essential: true
+        Memory: 128
+        PortMappings:
+        - ContainerPort: 80
+          HostPort: 0
+        Environment:
+        - Name: Tag
+          Value: !Ref DockerTag
+        - Name: StackName
+          Value: !Ref AWS::StackName
+        - Name: WEB_URL
+          Value: !Sub https://${HostName}.${DomainSuffix}
+        - Name: SECRET_KEY
+          Value: !Sub "{{resolve:secretsmanager:${Secret}}}"
+        - Name: WEB_PORT
+          Value: 80
+        - Name: AWS_DEFAULT_REGION
+          Value: !Ref AWS::Region
+        - Name: DYNAMO_TABLENAME
+          Value: !Ref DynamoDBTable
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            awslogs-group: !Ref AWS::StackName
+            awslogs-region: !Ref AWS::Region
+            awslogs-stream-prefix: !Sub ${AWS::StackName}-app
+
+  Secret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: Dynamically generated whisper secret
+      GenerateSecretString:
+        PasswordLength: 30
+        ExcludeCharacters: '"@/\'
+
+###
+### Load Balancer
+###
+
+  ACMCert:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Sub ${HostName}.${DomainSuffix}
+      DomainValidationOptions:
+        - DomainName: !Sub ${HostName}.${DomainSuffix}
+          ValidationDomain: !Ref DomainSuffix
+
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub ${AWS::StackName}-web-external
+      SecurityGroups:
+      - !Ref pubSecurityGroup
+      Subnets: !Ref ALBSubnets
+
+  LoadBalancerListenerHTTP:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    DependsOn:
+    - AutoScalingGroup
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: redirect
+          RedirectConfig:
+            Port: 443
+            Protocol: HTTPS
+            StatusCode: HTTP_301
+
+  LoadBalancerListenerHTTPS:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    DependsOn:
+    - AutoScalingGroup
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 443
+      Protocol: HTTPS
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+      Certificates:
+        - CertificateArn: !Ref ACMCert
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    DependsOn:
+    - AutoScalingGroup
+    Properties:
+      VpcId: !Ref VPCId
+      Port: 80
+      Protocol: HTTP
+      Matcher:
+        HttpCode: 200-299
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: /elb-status
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: 30
+
+  ALBDNS:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      AliasTarget:
+        DNSName: !GetAtt LoadBalancer.DNSName
+        EvaluateTargetHealth: false
+        HostedZoneId: !GetAtt LoadBalancer.CanonicalHostedZoneID
+      Comment: Alias for ELB
+      Type: A
+      Name: !Sub ${HostName}.${DomainSuffix}.
+      HostedZoneName: !Sub ${DomainSuffix}.
+
+###
+### DynamoDB Table
+###
+
+  DynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref DynamoTableName
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+      SSESpecification:
+        SSEEnabled: true
+
+###
+### Log Group
+###
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Ref AWS::StackName
+      RetentionInDays: 90
+
+
+Outputs:
+  ClusterName:
+      Value: !Ref Cluster
+
+  TemplateVersion:
+    Value: !Ref TemplateVersion
+
