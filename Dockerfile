@@ -1,9 +1,9 @@
-FROM python:3.7-alpine
+FROM python:3.9-alpine
 
 ENV WEB_PORT 8000
 
 RUN mkdir -p /usr/src/app \
-    && apk add --update --no-cache py-setuptools nginx bash gettext \
+    && apk add --update --no-cache py-setuptools nginx bash gettext libseccomp \
     && rm -rf /etc/nginx/*.default \
     && rm -rf /var/cache/apk/* \
     && rm -rf /tmp/* \
