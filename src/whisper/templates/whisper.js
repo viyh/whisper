@@ -10,23 +10,6 @@ function decrypt(ciphertext, password) {
     return CryptoJS.AES.decrypt(ciphertext, password);
 }
 
-// function get_sha256(password) {
-//     return CryptoJS.SHA256(password)
-// }
-
-// function get_salt() {
-//     return CryptoJS.lib.WordArray.random(20);
-// }
-
-// function get_ssha256(password) {
-//     var algo = CryptoJS.algo.SHA256.create();
-//     var salt = get_salt();
-//     algo.update(password, 'utf-8');
-//     algo.update(CryptoJS.SHA256(salt), 'utf-8');
-//     var hash = algo.finalize().toString(CryptoJS.enc.Base64);
-//     return hash
-// }
-
 function new_link(event) {
     event.preventDefault();
     var password = document.getElementById('inputPassword').value;
