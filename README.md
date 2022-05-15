@@ -121,3 +121,19 @@ Joe Richards <nospam-github@disconformity.net>
 ## Licence ##
 
 [MIT License](LICENSE)
+
+## Updates ##
+
+* Simplify crypto
+* Use SHA256 hashes for item paths
+* Use bcrypt for password hashing
+* Complete rewrite for pluggable storage backends
+* Storage cleaner runs periodically in background
+* Better logging and debugging
+* Run as unprivileged user
+
+## To Do ##
+
+* Add file sharing support
+* Add storage backends: DynamoDB, S3, GCS?
+* Add HTTP error pages

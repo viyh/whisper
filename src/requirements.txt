@@ -1,0 +1,7 @@
+Flask==2.1.2
+Flask-Cors==3.0.10
+boto3==1.22.13
+botocore==1.25.13
+gunicorn==20.1.0
+pyyaml==6.0
+bcrypt==3.2.2

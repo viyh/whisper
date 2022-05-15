@@ -36,9 +36,9 @@
             <br />
             <div id="copy-link-target" class="copy-link">
                 <div class="input-group">
-                    <input type="text" class="form-control" id="data_link" onClick="this.setSelectionRange(0, this.value.length);" readonly>
+                    <input type="text" class="form-control" id="secret_link" onClick="this.setSelectionRange(0, this.value.length);" readonly>
                     <span class="input-group-button">
-                        <button class="btn clipbtn" data-clipboard-target="#data_link">
+                        <button class="btn clipbtn" data-clipboard-target="#secret_link">
                             <img class="clippy" src="assets/clippy.svg" width="13" alt="Copy to clipboard">
                         </button>
                     </span>
@@ -53,8 +53,8 @@
         </div>
         <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.3/jquery.min.js"></script>
         <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/js/bootstrap.min.js" integrity="sha384-0mSbJDEHialfmuBBQP6A4Qrprq5OVfW37PRR3j5ELqxss1yVqOtnepnHVP9aJ7xS" crossorigin="anonymous"></script>
-        <script type="text/javascript" src="js/crypto-js.min.js"></script>
-        <script type="text/javascript" src="js/clipboard.min.js"></script>
-        <script type="text/javascript" src="js/whisper.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/clipboard.js/2.0.10/clipboard.min.js"></script>
+        <script type="text/javascript" src="assets/whisper.js"></script>
     </body>
 </html>
