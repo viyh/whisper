@@ -124,13 +124,14 @@ Joe Richards <viyh@users.noreply.github.com>
 
 ## Updates ##
 
-* Simplify crypto
-* Use SHA256 hashes for item paths
-* Use bcrypt for password hashing
 * Complete rewrite for pluggable storage backends
+* Use bcrypt for password hashing
 * Storage cleaner runs periodically in background
 * Better logging and debugging
 * Run as unprivileged user
+* Simplify crypto
+* Use SHA256 hashes for item paths
+* Use CDN JS libs
 
 ## To Do ##
 
