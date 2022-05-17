@@ -1,6 +1,7 @@
 from flask import (
     Flask,
     render_template,
+    make_response,
     send_from_directory,
     redirect,
     url_for,
@@ -27,7 +28,9 @@ if __name__ != "__main__":
 @app.route("/assets/whisper.js")
 def send_whisperjs():
     """Serve js files."""
-    return render_template("whisper.js", web_url=config["web_url"])
+    resp = make_response(render_template("whisper.js", web_url=config["web_url"]))
+    resp.headers["Content-type"] = "text/javascript; charset=utf-8"
+    return resp
 
 
 @app.route("/assets/<path:path>")
@@ -99,10 +102,12 @@ def show_secret(secret_id):
 @app.errorhandler(413)
 def request_entity_too_large(error):
     return (
-        {
-            "result": "Maximum file upload size is "
-            f"{config.get('max_data_size_mb', 1)} MB"
-        },
+        jsonify(
+            {
+                "result": "Maximum file upload size is "
+                f"{config.get('max_data_size_mb', 1)} MB"
+            }
+        ),
         413,
     )
 
