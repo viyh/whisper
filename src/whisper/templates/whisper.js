@@ -91,7 +91,7 @@ function get_data(event) {
                 var file_contents = atob(decrypted.split(',')[2]);
                 console.log("File: ", file_name, file_mime);
                 var blob = dataURL_to_blob(file_mime, file_contents);
-                var file_dl = document.createElement('file_dl');
+                var file_dl = document.createElement('a');
                 file_dl.download = file_name;
                 file_dl.href = window.URL.createObjectURL(blob);
                 file_dl.click();

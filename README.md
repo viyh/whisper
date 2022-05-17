@@ -137,7 +137,8 @@ Joe Richards <nospam-github@disconformity.net>
 
 ## To Do ##
 
-* Implement rate limiting for requests per minute
 * Add storage backends: DynamoDB, S3, GCS?
 * Add HTTP error pages
+* Implement rate limiting for requests per minute
 * Dark mode
+* Update documentation
