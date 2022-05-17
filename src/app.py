@@ -47,6 +47,9 @@ def new_secret():
 def create_secret():
     """Create a new secret"""
     s = secret()
+    # This has to be here in order for Flask to check against MAX_CONTENT_LENGTH
+    # See: https://github.com/pallets/flask/issues/2690
+    request.data
     s.create(
         expiration=request.json["expiration"],
         key_pass=s.get_key_pass(request.json["password"], config.get("secret_key")),
@@ -74,7 +77,9 @@ def show_secret(secret_id):
     # get secret
     s = store.get_secret(secret_id)
     if not s or not s.check_id():
-        app.logger.info(f"[{request.remote_addr}] Secret invalid secret_id: {s.id}")
+        app.logger.info(
+            f"[{request.remote_addr}] Secret invalid secret_id: {secret_id}"
+        )
         return jsonify({"result": "Invalid ID"})
 
     # check secret
@@ -91,9 +96,21 @@ def show_secret(secret_id):
     return jsonify({"encrypted_data": s.data})
 
 
+@app.errorhandler(413)
+def request_entity_too_large(error):
+    return (
+        {
+            "result": "Maximum file upload size is "
+            f"{config.get('max_data_size_mb', 1)} MB"
+        },
+        413,
+    )
+
+
 config = load_config()
 store = store(config.get("storage_class"), config.get("storage_config"))
 store.start()
+app.config["MAX_CONTENT_LENGTH"] = config.get("max_data_size_mb", 1) * 1000 * 1000
 
 if __name__ == "__main__":
     app.run(

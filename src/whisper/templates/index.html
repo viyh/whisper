@@ -21,8 +21,14 @@
             <form id="form" class="form-horizontal" onsubmit="new_link(event);">
                 <label for="inputPassword" class="control-label">Password</label>
                 <input autocomplete="off" type="text" id="inputPassword" class="form-control" placeholder="Enter a password required to retrieve text" required>
+                <br />
+                <br />
                 <label for="inputText" class="control-label">Text</label>
-                <textarea class="form-control" rows="5" id="inputText" placeholder="Enter text here" required></textarea>
+                <textarea class="form-control" name="inputText" rows="5" id="inputText" placeholder="Enter text here" required></textarea>
+                <label for="inputFile" class="control-label">Or upload file:</label>
+                <input type="file" id="inputFilename" name="inputFilename" class="form-control" required />
+                <br />
+                <br />
                 <label for="expiration" class="control-label">Expiration:</label>
                 <select class="form-control" id="expiration" required>
                     <option>One time use</option>
@@ -56,5 +62,18 @@
         <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/clipboard.js/2.0.10/clipboard.min.js"></script>
         <script type="text/javascript" src="assets/whisper.js"></script>
+        <script>
+            document.addEventListener('DOMContentLoaded', function() {
+                const inputs = Array.from(
+                    document.querySelectorAll('textarea[name=inputText], input[name=inputFilename]')
+                );
+                const inputListener = e => {
+                    inputs
+                        .filter(i => i !== e.target)
+                        .forEach(i => (i.required = !e.target.value.length));
+                };
+                inputs.forEach(i => i.addEventListener('input', inputListener));
+            });
+        </script>
     </body>
 </html>
