@@ -10,30 +10,68 @@ function decrypt(ciphertext, password) {
     return CryptoJS.AES.decrypt(ciphertext, password);
 }
 
+async function getBase64(fileInput) {
+    var file = fileInput.files[0];
+    let result_base64 = await new Promise((resolve) => {
+        let fileReader = new FileReader();
+        fileReader.onload = (e) => resolve(fileReader.result);
+        fileReader.readAsDataURL(file);
+    });
+    return 'filename:' + file.name + ',' + result_base64;
+}
+
+function send_new_link_data(encrypted, password, expiration, success, failure) {
+    var api_data = {'encrypted_data': encrypted.toString(), 'password': password, 'expiration': expiration};
+    document.getElementById('secret_link').value = 'Uploading data and generating link...';
+    api_call(web_url + api_path, "POST", api_data, success, failure);
+}
+
 function new_link(event) {
     event.preventDefault();
     var password = document.getElementById('inputPassword').value;
-    // var sha256 = get_ssha256(password);
-    var plaintext = document.getElementById('inputText').value
+    var inputText = document.getElementById('inputText').value;
+    var inputFilename = document.getElementById('inputFilename');
     var expiration = document.getElementById('expiration').value;
-    var encrypted = encrypt(plaintext, password);
+    var encrypted = null;
+    if (inputFilename && inputFilename.value != "") {
+        getBase64(inputFilename).then(base64file => {
+            encrypted = encrypt(base64file, password);
+            send_new_link_data(encrypted, password, expiration, success, failure);
+        });
+    }
+    else {
+        encrypted = encrypt(inputText, password);
+        send_new_link_data(encrypted, password, expiration, success, failure);
+    }
+
     function success (response) {
         document.getElementById('secret_link').value = web_url + '/' + response['id'];
         return true;
     }
     function failure (response) {
-        document.getElementById('secret_link').value = 'Could not create link.';
+        if ('result' in response) {
+            document.getElementById('secret_link').value = response['result'];
+        }
+        else {
+            document.getElementById('secret_link').value = 'Could not create link.';
+        }
         return false;
     }
-    var api_data = {'encrypted_data': encrypted.toString(), 'password': password, 'expiration': expiration};
-    document.getElementById('secret_link').value = 'Generating link...';
-    api_call(web_url + api_path, "POST", api_data, success, failure);
+
+}
+
+function dataURL_to_blob(file_mime, file_contents) {
+    var ab = new ArrayBuffer(file_contents.length);
+    var ia = new Uint8Array(ab);
+    for (var i = 0; i < file_contents.length; i++) {
+        ia[i] = file_contents.charCodeAt(i);
+    }
+    return blob = new Blob([ab], {type: file_mime});
 }
 
 function get_data(event) {
     event.preventDefault();
     var password = document.getElementById('inputPassword').value;
-    // var sha256 = get_ssha256(password);
     var secret_id = document.getElementById('secret_id').value;
     function failure (response) {
         document.getElementById('decrypted_text').value = response["result"];
@@ -44,11 +82,32 @@ function get_data(event) {
             document.getElementById('decrypted_text').value = response["result"];
         }
         else {
-            var decrypted = decrypt(response['encrypted_data'].toString(), password);
-            document.getElementById('decrypted_text').value = decrypted.toString(CryptoJS.enc.Utf8);
+            var decrypted = decrypt(response['encrypted_data'].toString(), password).toString(CryptoJS.enc.Utf8);
+            var regex = /^filename:(.+?),data:(\w+\/[-+.\w]+);base64,(.*)$/;
+            var match = decrypted.substring(0,100).match(regex)
+            if (match) {
+                var file_name = match[1];
+                var file_mime = match[2];
+                var file_contents = atob(decrypted.split(',')[2]);
+                console.log("File: ", file_name, file_mime);
+                var blob = dataURL_to_blob(file_mime, file_contents);
+                var file_dl = document.createElement('file_dl');
+                file_dl.download = file_name;
+                file_dl.href = window.URL.createObjectURL(blob);
+                file_dl.click();
+            }
+            else {
+                var text = document.getElementById('decrypted_text')
+                text.style.visibility = "visible";
+                var label = document.getElementById('decrypted_text_label')
+                label.style.visibility = "visible";
+                console.log("Text: ", decrypted);
+                document.getElementById('decrypted_text').value = decrypted;
+            }
         }
     }
     var api_data = {'password': password};
+    document.getElementById('decrypted_text').value = "Downloading secret..."
     api_call(web_url + api_path + secret_id, "POST", api_data, success, failure);
 }
 
