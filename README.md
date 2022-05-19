@@ -1,22 +1,32 @@
 # [Whisper](https://github.com/viyh/whisper) #
 
-Whisper is used to securely distribute credentials that are too sensitive to send via plaintext.
+Whisper is used to simply and securely distribute secrets that are too
+sensitive to send via plaintext.
 
 ## Overview ##
 
-The data is entered and encrypted with AES using a supplied password. A link is
-created and can be sent to the other party, and the password can be provided to
-them by other means such as instant messaging or a phone call. The data can be
-set to delete after one viewing, one hour, one day, or one week. Any data will
-be deleted at a maximum of 30 days regardless of if it was retrieved. DynamoDB
-is used to store the data.
+![Whisper Architecture](whisper_arch.png?raw=true "Architecture")
 
-All encryption is done client-side, so no data is transmitted in plaintext. The
-only data stored in the DynamoDB table is the encrypted text, salted SHA256 hash,
-ID number, and date of expiration and creation.
+How it works:
+
+A user has a secret to send to someone else. Instead of using insecure means
+such as email or instant messenger, they enter the secret and a password used to
+encrypt the secret. The secret can be text or a file and an expiration time is
+chosen for the secret such as one time, hour, day, or week. The user receives a
+link from the server which can be shared with the other person as well as the
+shared password used for retrieval. The password should be shared separately
+from the link, such as sending the link by email and telling them the password
+via txt message. The other person can retrieve the secret by browsing to the
+link and entering the shared password.
+
+All AES encryption and decryption is handled on the client-side, so no data is
+transmitted in plaintext. The backend stores the encrypted data and salted
+password hash, but because the client creates a salted SHA512 hash from the
+password before sending it to the server, even if the server is compromised or
+the administrator is a malicious actor, they will be unable to decrypt the
+secret data.
 
 ## Installation ##
-
 
 ### Docker ###
 
@@ -29,7 +39,7 @@ Run the docker image:
         docker run --name whisper \
             -p 8000:8000 \
             -e SECRET_KEY=thi\$1smyC00L5ecr3t \
-            -it viyh/whisper
+            -it viyh/whisper:0.1.0
 
 ### DynamoDB Table ###
 
@@ -125,7 +135,8 @@ Joe Richards <nospam-github@disconformity.net>
 ## Updates ##
 
 * Complete rewrite for pluggable storage backends
-* Use bcrypt for password hashing
+* Use PBKDF2 (salted SHA512, 10000 rounds) for client-side password hashing
+* Use bcrypt for server-side password hashing
 * Add file sharing support
 * Add size limit for files
 * Storage cleaner runs periodically in background
