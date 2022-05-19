@@ -4,6 +4,22 @@ app_port: 5000
 max_data_size_mb: 1
 web_url: http://localhost:8000
 secret_key: 'w7bAyd&zpc#jPUc2Y6K%gbRtuF@M9Y^@'
-storage_class: whisper.storage.local.local
-storage_config:
-    path: /tmp/whisper
+storage_clean_interval: 3600
+
+storage_class: whisper.storage.memory.memory
+storage_config: {}
+
+# storage_class: whisper.storage.local.local
+# storage_config:
+#     path: /tmp/whisper
+
+# storage_class: whisper.storage.aws.s3
+# storage_config:
+#     bucket_name: my-secret-bucket
+#     bucket_path: secrets
+
+# storage_class: whisper.storage.aws.s3_dynamodb
+# storage_config:
+#     bucket_name: my-secret-bucket
+#     bucket_path: secrets
+#     table_name: whisper

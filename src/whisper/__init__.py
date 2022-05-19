@@ -1,10 +1,11 @@
-import time
-import os
-import yaml
-import logging
 import importlib
+import logging
+import os
 import secrets
+import time
+
 import bcrypt
+import yaml
 
 logger = logging.getLogger("whisper")
 
@@ -37,13 +38,6 @@ class secret:
         self.id = secrets.token_hex(20)
         return True
 
-    def dummy(self, **kwargs):
-        self.new_id()
-        self.create_date = int(time.time())
-        self.expire_date = int(time.time()) + secrets.randbelow(86400 * 7)
-        for key, value in kwargs.items():
-            setattr(self, key, value)
-
     def create(self, expiration, key_pass, data):
         self.new_id()
         self.create_date = int(time.time())
@@ -65,7 +59,7 @@ class secret:
 
     def is_expired(self):
         now = int(time.time())
-        return now >= self.expire_date and self.expire_date != -1
+        return self.expire_date and now >= self.expire_date and self.expire_date != -1
 
     def is_one_time(self):
         return self.expire_date == -1
