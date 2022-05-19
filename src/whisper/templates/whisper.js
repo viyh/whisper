@@ -10,6 +10,17 @@ function decrypt(ciphertext, password) {
     return CryptoJS.AES.decrypt(ciphertext, password);
 }
 
+function pw_hash(password) {
+    // Use known public salt for client-side hash.
+    // This prevents the server administrator from ever knowing the
+    // real password so they will be unable to decrypt the user's data.
+    var salt = location.hostname;
+    return CryptoJS.PBKDF2(password, salt, {
+        keySize: 512 / 32,
+        iterations: 10000
+    }).toString(CryptoJS.enc.Base64);
+}
+
 async function getBase64(fileInput) {
     var file = fileInput.files[0];
     let result_base64 = await new Promise((resolve) => {
@@ -21,7 +32,7 @@ async function getBase64(fileInput) {
 }
 
 function send_new_link_data(encrypted, password, expiration, success, failure) {
-    var api_data = {'encrypted_data': encrypted.toString(), 'password': password, 'expiration': expiration};
+    var api_data = {'encrypted_data': encrypted.toString(), 'password': pw_hash(password), 'expiration': expiration};
     document.getElementById('secret_link').value = 'Uploading data and generating link...';
     api_call(web_url + api_path, "POST", api_data, success, failure);
 }
@@ -106,7 +117,7 @@ function get_data(event) {
             }
         }
     }
-    var api_data = {'password': password};
+    var api_data = {'password': pw_hash(password)};
     document.getElementById('decrypted_text').value = "Downloading secret..."
     api_call(web_url + api_path + secret_id, "POST", api_data, success, failure);
 }
