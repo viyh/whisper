@@ -1,15 +1,15 @@
-from whisper import secret, class_loader
-import time
 import logging
 import threading
+import time
+
+from whisper import class_loader, secret
 
 logger = logging.getLogger(__name__)
 
 
 class store_cleaner:
-    def __init__(self, store, interval=300):
+    def __init__(self, store):
         logger.debug("Cleaner - Init")
-        self.interval = interval
         self.store = store
         self.thread = threading.Thread(name="store_cleaner", target=self.run, args=())
         self.thread.daemon = True
@@ -21,14 +21,15 @@ class store_cleaner:
         while True:
             logger.info("Cleaner - Deleting expired secrets")
             self.store.delete_expired()
-            logger.info(f"Cleaner - Sleeping for {self.interval} seconds")
-            time.sleep(self.interval)
+            logger.info(f"Cleaner - Sleeping for {self.store.clean_interval} seconds")
+            time.sleep(self.store.clean_interval)
 
 
 class store:
-    def __init__(self, storage_class, storage_config={}):
+    def __init__(self, storage_class, storage_config={}, clean_interval=3600):
         self.storage_class = storage_class
         self.config = storage_config
+        self.clean_interval = clean_interval
 
     def start(self):
         self.backend = class_loader(

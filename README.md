@@ -127,18 +127,19 @@ Joe Richards <nospam-github@disconformity.net>
 * Complete rewrite for pluggable storage backends
 * Use bcrypt for password hashing
 * Add file sharing support
+* Add size limit for files
 * Storage cleaner runs periodically in background
 * Better logging and debugging
 * Run as unprivileged user
 * Simplify crypto
 * Use SHA256 hashes for item paths
 * Use CDN JS libs
-* Implement size limiting for files
 
 ## To Do ##
 
 * Add storage backends: DynamoDB, S3, GCS?
 * Add HTTP error pages
 * Implement rate limiting for requests per minute
+* Update look and feel
 * Dark mode
 * Update documentation

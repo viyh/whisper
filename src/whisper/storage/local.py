@@ -1,15 +1,16 @@
-from whisper.storage import store
-from whisper import secret
-import logging
-import json
-import os
 import glob
+import json
+import logging
+import os
+
+from whisper import secret
+from whisper.storage import store
 
 logger = logging.getLogger(__name__)
 
 
 class local(store):
-    def __init__(self, name="local", parent=None, path=None):
+    def __init__(self, name="local", parent=None, path="/tmp/whisper"):
         super().__init__(name, parent)
         self.path = path
         if not os.path.exists(self.path):
@@ -21,7 +22,7 @@ class local(store):
         if not s.check_id():
             return False
         secret_filename = os.path.join(self.path, f"{s.id}.json")
-        logger.debug(f"Reading local secret from file: {secret_filename}")
+        logger.debug(f"Reading secret from file: {secret_filename}")
         return self.secret_from_file(secret_filename)
 
     def set_secret(self, s):
@@ -30,7 +31,7 @@ class local(store):
         secret_filename = os.path.join(self.path, f"{s.id}.json")
         with open(secret_filename, "w") as secret_file:
             json.dump(s.__dict__, secret_file)
-        logger.debug(f"Saving local secret: {secret_filename}")
+        logger.debug(f"Saving secret: {secret_filename}")
         return True
 
     def delete_secret(self, secret_id):
@@ -38,7 +39,7 @@ class local(store):
         secret_filename = os.path.join(self.path, f"{s.id}.json")
         if not s or not s.check_id() or not os.path.exists(secret_filename):
             return True
-        logger.info(f"Deleting local secret: {secret_id}")
+        logger.info(f"Deleting secret: {secret_id}")
         os.remove(secret_filename)
         return True
 

@@ -1,18 +1,18 @@
+import logging
+
 from flask import (
     Flask,
-    render_template,
-    make_response,
-    send_from_directory,
-    redirect,
-    url_for,
     jsonify,
+    make_response,
+    redirect,
+    render_template,
     request,
+    send_from_directory,
+    url_for,
 )
-
-import logging
-from whisper.storage import store
-from whisper import secret, load_config
 from werkzeug.middleware.proxy_fix import ProxyFix
+from whisper import load_config, secret
+from whisper.storage import store
 
 __version__ = "0.1.0"
 
@@ -41,7 +41,7 @@ def send_assets(path):
 
 @app.route("/", methods=["GET"])
 def new_secret():
-    """Create a new secret"""
+    """Indwx page, start a new secret"""
     app.logger.debug(f"[{request.remote_addr}] Index")
     return render_template("index.html", version=__version__)
 
@@ -49,16 +49,18 @@ def new_secret():
 @app.route("/", methods=["POST"])
 def create_secret():
     """Create a new secret"""
-    s = secret()
     # This has to be here in order for Flask to check against MAX_CONTENT_LENGTH
     # See: https://github.com/pallets/flask/issues/2690
     request.data
+    # create secret object
+    s = secret()
     s.create(
         expiration=request.json["expiration"],
         key_pass=s.get_key_pass(request.json["password"], config.get("secret_key")),
         data=request.json["encrypted_data"],
     )
     app.logger.info(f"[{request.remote_addr}] Secret create: {s.id}")
+    # store the secret
     store.set_secret(s)
     return jsonify({"id": s.id})
 
@@ -66,7 +68,9 @@ def create_secret():
 @app.route("/<string:secret_id>", methods=["GET"])
 def get_secret(secret_id):
     """Display page to retrieve secret"""
+    # get secret object if it exists in storage
     s = store.get_secret(secret_id)
+    # if the secret exists, display the password page
     if s and s.check_id():
         app.logger.info(f"[{request.remote_addr}] Secret request: {s.id}")
         return render_template("show.html", version=__version__, secret_id=secret_id)
@@ -85,18 +89,24 @@ def show_secret(secret_id):
         )
         return jsonify({"result": "Invalid ID"})
 
-    # check secret
+    # check the password
     key_pass = s.get_key_pass(request.json["password"], config.get("secret_key"))
     if not s.check_password(key_pass):
         app.logger.info(f"[{request.remote_addr}] Secret invalid password: {s.id}")
         return jsonify({"result": "Invalid password."})
 
-    # delete one-time secrets
+    # delete if one-time secret
     if s.is_one_time():
         store.delete_secret(secret_id)
 
+    # return the secret
     app.logger.info(f"[{request.remote_addr}] Secret retrieved: {s.id}")
     return jsonify({"encrypted_data": s.data})
+
+
+@app.errorhandler(404)
+def not_found(error):
+    return redirect(url_for("new_secret"))
 
 
 @app.errorhandler(413)
@@ -113,7 +123,11 @@ def request_entity_too_large(error):
 
 
 config = load_config()
-store = store(config.get("storage_class"), config.get("storage_config"))
+store = store(
+    config.get("storage_class"),
+    config.get("storage_config"),
+    clean_interval=config.get("storage_clean_interval", 3600),
+)
 store.start()
 app.config["MAX_CONTENT_LENGTH"] = config.get("max_data_size_mb", 1) * 1000 * 1000
 
