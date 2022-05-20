@@ -154,3 +154,4 @@ Joe Richards <nospam-github@disconformity.net>
 * Update look and feel
 * Dark mode
 * Update documentation
+* Better error message for wrong password

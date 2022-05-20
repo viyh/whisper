@@ -19,10 +19,9 @@
                 </ul>
             </div>
             <form id="form" class="form-horizontal" onsubmit="get_data(event);">
-                <label for="inputPassword" class="control-label">Password</label>
-                <input autocomplete="off" type="text" id="inputPassword" class="form-control" placeholder="Enter password required to retrieve text" required>
+                <label for="password" class="control-label">Password</label>
+                <input autocomplete="off" type="text" id="password" class="form-control" placeholder="Enter password required to retrieve text" required>
                 <br />
-                <input type="hidden" id="secret_id" class="form-control" value="{{secret_id}}" required>
                 <button class="btn btn-md btn-primary btn-block" type="submit">Get Secret</button>
                 <br />
                 <label for="decrypted_text" id="decrypted_text_label" class="control-label" style="visibility: hidden;">Decrypted Secret</label>
