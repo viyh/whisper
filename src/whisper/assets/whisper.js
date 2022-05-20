@@ -88,7 +88,7 @@ function dataURL_to_blob(file_mime, file_contents) {
 }
 
 // Download decrypted secret file
-function get_file(decrypted, file_name, file_mime) {
+function download_secret_file(decrypted, file_name, file_mime) {
     let file_contents = atob(decrypted.split(',')[2]);
     let blob = dataURL_to_blob(file_mime, file_contents);
     let file_dl = document.createElement('a');
