@@ -27,7 +27,7 @@ class s3(store):
             return False
         secret_filename = f"{s.id}.json"
         logger.debug(f"Reading S3 secret from file: {secret_filename}")
-        return self.secret_from_file(secret_filename)
+        return self.secret_from_s3_obj(secret_filename)
 
     def set_secret(self, s):
         if not s.check_id():
@@ -40,10 +40,6 @@ class s3(store):
         logger.info(f"Deleting S3 secret: {secret_id}")
         self.delete_s3_obj(f"{secret_id}.json")
         return True
-
-    def secret_from_file(self, secret_filename):
-        s3_obj = self.get_s3_obj(secret_filename)
-        return self.secret_from_s3_obj(s3_obj)
 
     def delete_expired(self):
         s3_objs = self.s3_client.list_objects_v2(
@@ -91,12 +87,18 @@ class s3(store):
         )
         return True
 
-    def secret_from_s3_obj(self, s3_obj):
+    def secret_from_s3_obj(self, secret_filename):
+        s3_obj = self.get_s3_obj(secret_filename)
+        if not s3_obj:
+            return False
+
         s = secret()
         try:
             s.load_from_dict(json.load(s3_obj["Body"]))
         except Exception as e:
             logger.error(f"Could not parse S3 file: {e}")
-        if not s.check_id():
+
+        if s and s.check_id():
+            return s
+        else:
             return False
-        return s

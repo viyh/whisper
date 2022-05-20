@@ -3,7 +3,6 @@ import logging
 from flask import (
     Flask,
     jsonify,
-    make_response,
     redirect,
     render_template,
     request,
@@ -25,14 +24,6 @@ if __name__ != "__main__":
     app.logger.setLevel(gunicorn_logger.level)
 
 
-@app.route("/assets/whisper.js")
-def send_whisperjs():
-    """Serve js files."""
-    resp = make_response(render_template("whisper.js", web_url=config["web_url"]))
-    resp.headers["Content-type"] = "text/javascript; charset=utf-8"
-    return resp
-
-
 @app.route("/assets/<path:path>")
 def send_assets(path):
     """Serve asset files."""
@@ -41,7 +32,7 @@ def send_assets(path):
 
 @app.route("/", methods=["GET"])
 def new_secret():
-    """Indwx page, start a new secret"""
+    """Index page, start a new secret"""
     app.logger.debug(f"[{request.remote_addr}] Index")
     return render_template("index.html", version=__version__)
 
@@ -73,7 +64,10 @@ def get_secret(secret_id):
     # if the secret exists, display the password page
     if s and s.check_id():
         app.logger.info(f"[{request.remote_addr}] Secret request: {s.id}")
-        return render_template("show.html", version=__version__, secret_id=secret_id)
+        return render_template(
+            "show.html",
+            version=__version__,
+        )
     else:
         return redirect(url_for("new_secret"))
 

@@ -24,10 +24,12 @@ class secret:
         attr = ["id", "create_date", "expire_date", "data", "hash"]
         # check if dict has appropriate attributes
         if set(attr) != set(secret_dict):
+            logger.debug("Secret dict is missing some attributes.")
             return False
         # set attributes
         for key, value in secret_dict.items():
             setattr(self, key, value)
+        return True
 
     def check_id(self):
         return self.id and self.id.isalnum() and len(self.id) == 40

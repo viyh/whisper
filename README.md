@@ -154,3 +154,4 @@ Joe Richards <viyh@users.noreply.github.com>
 * Update look and feel
 * Dark mode
 * Update documentation
+* Better error message for wrong password
