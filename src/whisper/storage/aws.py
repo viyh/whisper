@@ -46,10 +46,12 @@ class s3(store):
             Bucket=self.bucket_name, Prefix=self.bucket_path
         )
         for store_obj in store_objs.get("Contents", []):
-            secret_id = os.path.splitext(os.path.basename(store_obj["Key"]))[0]
-            s = secret()
+            secret_id, ext = os.path.splitext(os.path.basename(store_obj["Key"]))
+            if ext != ".json":
+                continue
+            s = secret(secret_id)
             s.expire_date = self.get_s3_obj_expire_date(store_obj["Key"])
-            if s.is_expired():
+            if s.check_id() and s.is_expired():
                 self.delete_secret(secret_id)
 
     def get_s3_obj_expire_date(self, full_key):
@@ -59,7 +61,7 @@ class s3(store):
         for tag in tagset:
             if tag["Key"] == "expire_date":
                 return int(tag["Value"])
-        return False
+        return True
 
     def delete_s3_obj(self, key):
         full_path = os.path.join(self.bucket_path, key)

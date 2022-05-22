@@ -46,21 +46,20 @@ class gcs(store):
     def delete_expired(self):
         store_objs = self.client.list_blobs(self.bucket_name, prefix=self.bucket_path)
         for store_obj in store_objs:
-            secret_id = os.path.splitext(os.path.basename(store_obj.name))[0]
-            s = secret()
+            secret_id, ext = os.path.splitext(os.path.basename(store_obj.name))
+            if ext != ".json":
+                continue
+            s = secret(secret_id)
             s.expire_date = self.get_gcs_obj_expire_date(store_obj.name)
-            if s.is_expired():
+            if s.check_id() and s.is_expired():
                 self.delete_secret(secret_id)
 
     def get_gcs_obj_expire_date(self, full_key):
         store_obj = self.bucket.get_blob(full_key)
-        logger.debug(f"DEBUG {store_obj.metadata}")
-        if not store_obj.metadata:
-            return False
-        for key, value in store_obj.metadata.items():
-            if key == "expire_date":
-                return int(value)
-        return False
+        expire_date = store_obj.metadata.get("expire_date")
+        if not store_obj.metadata or not expire_date:
+            return True
+        return int(expire_date)
 
     def delete_gcs_obj(self, key):
         full_path = os.path.join(self.bucket_path, key)
