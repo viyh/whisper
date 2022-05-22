@@ -99,10 +99,7 @@ function download_secret_file(decrypted, file_name, file_mime) {
 
 // Display decrypted secret text
 function display_secret_text(decrypted) {
-    let label = document.getElementById('decrypted_text_label')
     let text = document.getElementById('decrypted_text')
-    label.style.visibility = "visible";
-    text.style.visibility = "visible";
     text.value = decrypted;
 }
 

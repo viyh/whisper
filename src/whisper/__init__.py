@@ -81,7 +81,7 @@ class secret:
             return False
         return bcrypt.checkpw(key_pass, self.hash.encode("utf-8"))
 
-    def set_password(self, key_pass, salt_rounds=14):
+    def set_password(self, key_pass, salt_rounds=12):
         """Generate salted hash and store it"""
         salt = bcrypt.gensalt(rounds=salt_rounds)
         self.hash = bcrypt.hashpw(key_pass, salt).decode("utf-8")
