@@ -19,7 +19,7 @@ class s3(store):
                 "No bucket name specified, please add storage_config -> bucket_name "
                 "to the config.yaml file."
             )
-        self.s3_client = boto3.client("s3")
+        self.client = boto3.client("s3")
 
     def get_secret(self, secret_id):
         s = secret(secret_id)
@@ -42,18 +42,18 @@ class s3(store):
         return True
 
     def delete_expired(self):
-        s3_objs = self.s3_client.list_objects_v2(
+        store_objs = self.client.list_objects_v2(
             Bucket=self.bucket_name, Prefix=self.bucket_path
         )
-        for s3_obj in s3_objs.get("Contents", []):
-            secret_id = os.path.splitext(os.path.basename(s3_obj["Key"]))[0]
+        for store_obj in store_objs.get("Contents", []):
+            secret_id = os.path.splitext(os.path.basename(store_obj["Key"]))[0]
             s = secret()
-            s.expire_date = self.get_s3_obj_expire_date(s3_obj["Key"])
+            s.expire_date = self.get_s3_obj_expire_date(store_obj["Key"])
             if s.is_expired():
                 self.delete_secret(secret_id)
 
     def get_s3_obj_expire_date(self, full_key):
-        tagset = self.s3_client.get_object_tagging(
+        tagset = self.client.get_object_tagging(
             Bucket=self.bucket_name, Key=full_key
         ).get("TagSet")
         for tag in tagset:
@@ -64,22 +64,22 @@ class s3(store):
     def delete_s3_obj(self, key):
         full_path = os.path.join(self.bucket_path, key)
         try:
-            self.s3_client.delete_object(Bucket=self.bucket_name, Key=full_path)
-        except self.s3_client.exceptions.NoSuchKey:
+            self.client.delete_object(Bucket=self.bucket_name, Key=full_path)
+        except self.client.exceptions.NoSuchKey:
             pass
         return True
 
     def get_s3_obj(self, key):
         full_path = os.path.join(self.bucket_path, key)
         try:
-            s3_obj = self.s3_client.get_object(Bucket=self.bucket_name, Key=full_path)
-        except self.s3_client.exceptions.NoSuchKey:
+            store_obj = self.client.get_object(Bucket=self.bucket_name, Key=full_path)
+        except self.client.exceptions.NoSuchKey:
             return False
-        return s3_obj
+        return store_obj
 
     def put_s3_obj(self, s):
         full_path = os.path.join(self.bucket_path, f"{s.id}.json")
-        self.s3_client.put_object(
+        self.client.put_object(
             Body=bytes(json.dumps(s.__dict__).encode("utf-8")),
             Bucket=self.bucket_name,
             Key=full_path,
@@ -88,13 +88,13 @@ class s3(store):
         return True
 
     def secret_from_s3_obj(self, secret_filename):
-        s3_obj = self.get_s3_obj(secret_filename)
-        if not s3_obj:
+        store_obj = self.get_s3_obj(secret_filename)
+        if not store_obj:
             return False
 
         s = secret()
         try:
-            s.load_from_dict(json.load(s3_obj["Body"]))
+            s.load_from_dict(json.load(store_obj["Body"]))
         except Exception as e:
             logger.error(f"Could not parse S3 file: {e}")
 

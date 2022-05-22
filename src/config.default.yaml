@@ -16,3 +16,8 @@ storage_config: {}
 # storage_config:
 #     bucket_name: my-secret-bucket
 #     bucket_path: secrets
+
+# storage_class: whisper.storage.gcp.gcs
+# storage_config:
+#     bucket_name: my-secret-bucket
+#     bucket_path: secrets
