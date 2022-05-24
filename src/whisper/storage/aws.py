@@ -3,7 +3,7 @@ import logging
 import os
 
 import boto3
-from whisper import secret
+from whisper import secret, ConfigError
 from whisper.storage import store
 
 logger = logging.getLogger(__name__)
@@ -15,10 +15,7 @@ class s3(store):
         self.bucket_name = bucket_name
         self.bucket_path = bucket_path
         if not self.bucket_name:
-            raise (
-                "No bucket name specified, please add storage_config -> bucket_name "
-                "to the config.yaml file."
-            )
+            raise ConfigError("storage_config -> bucket_name")
         self.client = boto3.client("s3")
 
     def get_secret(self, secret_id):
@@ -50,18 +47,21 @@ class s3(store):
             if ext != ".json":
                 continue
             s = secret(secret_id)
-            s.expire_date = self.get_s3_obj_expire_date(store_obj["Key"])
+            s.create_date, s.expire_date = self.get_s3_obj_dates(store_obj["Key"])
             if s.check_id() and s.is_expired():
                 self.delete_secret(secret_id)
 
-    def get_s3_obj_expire_date(self, full_key):
+    def get_s3_obj_dates(self, full_key):
         tagset = self.client.get_object_tagging(
             Bucket=self.bucket_name, Key=full_key
         ).get("TagSet")
+        create_date, expire_date = 0, 0
         for tag in tagset:
-            if tag["Key"] == "expire_date":
-                return int(tag["Value"])
-        return True
+            if tag["Key"] == "create_date":
+                create_date = int(tag["Value"])
+            elif tag["Key"] == "expire_date":
+                expire_date = int(tag["Value"])
+        return create_date, expire_date
 
     def delete_s3_obj(self, key):
         full_path = os.path.join(self.bucket_path, key)
@@ -85,7 +85,7 @@ class s3(store):
             Body=bytes(json.dumps(s.__dict__).encode("utf-8")),
             Bucket=self.bucket_name,
             Key=full_path,
-            Tagging=f"expire_date={s.expire_date}",
+            Tagging=f"create_date={s.create_date}&expire_date={s.expire_date}",
         )
         return True
 
