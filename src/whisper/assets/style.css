@@ -7,13 +7,28 @@
 }
 
 .inputbtn {
+    width: 44px;
+    padding: 8px;
+    border: 1px solid #d5d5d5;
+    border-radius: 3px;
+    line-height: 0;
+}
+
+.inputbtn:hover, .inputbtn:focus, .inputbtn:active, .open>.dropdown-toggle.inputbtn {
     border: 1px solid #d5d5d5;
     border-radius: 3px;
 }
 
-.inputbtn:hover, .inputbtn:focus, .inputbtn:active, .inputbtn.active, .open>.dropdown-toggle.inputbtn {
-    border: 1px solid #d5d5d5;
-    border-radius: 3px;
+.inputbtn:active {
+    background-color: #ddd;
+}
+
+.clippy {
+    padding-left: 2px;
+}
+
+.btnimg {
+    width: 20px;
 }
 
 .output-group {
