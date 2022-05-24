@@ -36,10 +36,9 @@
                     <textarea class="form-control" name="secret_text" rows="5" id="secret_text" placeholder="Enter secret text here or select a file below"  ></textarea>
                 </div>
                 <br />
-                <div class="d-grid gap-2">
-                    <button class="btn btn-primary" type="button" onclick="file_choose();">Or Select a File</button>
+                <div class="mb3">
+                    <input class="form-control" type="file" name="secret_file" onchange="file_select();" id="secret_file">
                 </div>
-                <input class="form-control" type="file" id="secret_file" name="secret_file" onchange="file_select();" style="display:none"  />
                 <br />
                 <br />
                 <div class="mb-3">
