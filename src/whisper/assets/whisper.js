@@ -110,6 +110,7 @@ function new_link(event) {
     let expiration = document.getElementById('expiration').value;
     let secret_link = document.getElementById('secret_link');
     let encrypted = null;
+    secret_link.value = 'Encrypting, please wait...';
     if (!secret_text && !secret_file.value) {
         secret_link.value = 'Please enter text or choose a file.';
     }
@@ -136,7 +137,6 @@ function new_link(event) {
             secret_link.value = 'Could not create link.';
         }
     }
-
 }
 
 // Convery dataURL to binary Blob
