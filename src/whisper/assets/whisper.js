@@ -1,3 +1,61 @@
+function init_clipboard() {
+    // Clipboard
+    var clipboard = new ClipboardJS('.clipbtn');
+    clipboard.on('success', function(e) {
+        setTooltip('Copied!');
+        hideTooltip();
+    });
+    clipboard.on('error', function(e) {
+        setTooltip('Failed!');
+        hideTooltip();
+    });
+}
+
+function init_tooltip() {
+    // Tooltip for copied text
+    $('[data-bs-toggle=tooltip]').tooltip({
+        trigger: 'manual',
+        placement: 'right'
+    });
+}
+
+function setTooltip(message) {
+    $('[data-bs-toggle=tooltip]').tooltip('hide')
+        .attr('data-original-title', message)
+        .tooltip('show');
+}
+function hideTooltip() {
+    setTimeout(function() {
+        $('[data-bs-toggle=tooltip]').tooltip('hide');
+    }, 1500);
+}
+
+// Random password
+function random_pw() {
+    return CryptoJS.lib.WordArray.random(16).toString();
+}
+
+// Button clicker
+function file_choose() {
+    secret_file = document.getElementById('secret_file');
+    secret_file.click();
+}
+
+// Show filename in textbox
+function file_select() {
+    secret_file = document.getElementById('secret_file');
+    secret_text = document.getElementById('secret_text');
+    secret_text.value = secret_text.defaultValue;
+    if (secret_file.files.length == 1 && secret_file.files[0].name) {
+        secret_text.disabled = true;
+        secret_text.placeholder = 'File selected: ' + secret_file.files[0].name;
+    }
+    else {
+        secret_text.disabled = false;
+        secret_text.placeholder = 'Enter secret text here or select a file below';
+    }
+}
+
 // AES Encrypt plaintext using password
 function encrypt(plaintext, password) {
     return CryptoJS.AES.encrypt(plaintext, password);
@@ -15,7 +73,7 @@ function decrypt(ciphertext, password) {
 // re-salted/hashed on the server-side with bcrypt for storage to
 // prevent brute force attacks if the hash is stolen.
 function pw_hash(password) {
-    let salt = location.origin.repeat(4);
+    let salt = btoa(location.origin.repeat(4));
     return CryptoJS.PBKDF2(password, salt, {
         keySize: 512 / 32,
         iterations: 10000
@@ -48,12 +106,15 @@ function new_link(event) {
     event.preventDefault();
     let password = document.getElementById('password').value;
     let secret_text = document.getElementById('secret_text').value;
-    let secret_filename = document.getElementById('secret_filename');
+    let secret_file = document.getElementById('secret_file');
     let expiration = document.getElementById('expiration').value;
     let secret_link = document.getElementById('secret_link');
     let encrypted = null;
-    if (secret_filename && secret_filename.value != "") {
-        get_base64(secret_filename).then(base64_file => {
+    if (!secret_text && !secret_file.value) {
+        secret_link.value = 'Please enter text or choose a file.';
+    }
+    else if (secret_file && secret_file.value != "") {
+        get_base64(secret_file).then(base64_file => {
             encrypted = encrypt(base64_file, password);
             send_new_link_data(encrypted, password, expiration, success, failure);
         });
@@ -65,6 +126,7 @@ function new_link(event) {
 
     function success (response) {
         secret_link.value = location.origin + '/' + response['id'];
+        document.getElementById('copybutton').click();
     }
     function failure (response) {
         if ('result' in response) {
@@ -89,7 +151,7 @@ function dataURL_to_blob(file_mime, file_contents) {
 
 // Download decrypted secret file
 function download_secret_file(decrypted, file_name, file_mime) {
-    let file_contents = atob(decrypted.split(',')[2]);
+    let file_contents = atob(decrypted);
     let blob = dataURL_to_blob(file_mime, file_contents);
     let file_dl = document.createElement('a');
     file_dl.download = file_name;
@@ -116,17 +178,18 @@ function get_data(event) {
             decrypted_text.value = response["result"];
         }
         else {
-            let regex = /^filename:(.+?),data:(\w+\/[-+.\w]+);base64,(.*)$/;
+            let regex = /^filename:(.+?),data:(\w+\/[-+.\w]+);base64,/;
             let decrypted = decrypt(
                 response['encrypted_data'].toString(),
                 password
             ).toString(CryptoJS.enc.Utf8);
             let match = decrypted.substring(0,100).match(regex)
             if (match) {
-                download_secret_file(decrypted, match[1], match[2]);
+                download_secret_file(decrypted.replace(regex, ""), match[1], match[2]);
             }
             else {
                 display_secret_text(decrypted);
+                document.getElementById('copybutton').click();
             }
         }
     }

@@ -145,13 +145,13 @@ Joe Richards <nospam-github@disconformity.net>
 * Simplify crypto
 * Use SHA256 hashes for item paths
 * Use CDN JS libs
+* Add storage backends: S3, GCS, local, memory
+* Upgrade to python 3.10
+* Upgrade JS libs: jquery@3.6.0, bootstrap@5.0.2, clipboard.js@2.0.10, crypto-js@4.1.1
 
 ## To Do ##
 
-* Add storage backends: DynamoDB, S3, GCS?
-* Add HTTP error pages
 * Implement rate limiting for requests per minute
 * Update look and feel
 * Dark mode
 * Update documentation
-* Better error message for wrong password
