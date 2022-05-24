@@ -42,17 +42,10 @@ function random_pw() {
     return CryptoJS.lib.WordArray.random(16).toString();
 }
 
-// Button clicker
-function file_choose() {
-    secret_file = document.getElementById('secret_file');
-    secret_file.click();
-}
-
 // Show filename in textbox
 function file_select() {
     secret_file = document.getElementById('secret_file');
     secret_text = document.getElementById('secret_text');
-    secret_text.value = secret_text.defaultValue;
     if (secret_file.files.length == 1 && secret_file.files[0].name) {
         secret_text.disabled = true;
         secret_text.placeholder = 'File selected: ' + secret_file.files[0].name;
