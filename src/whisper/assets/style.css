@@ -3,7 +3,15 @@
 }
 
 .page-header {
-    padding: 30px;
+    padding-top: 30px;
+    padding-bottom: 10px;
+}
+
+.vcenter {
+    padding-top: 10px;
+    display: inline-block;
+    vertical-align: middle;
+    float: none;
 }
 
 .inputbtn {
@@ -50,7 +58,14 @@
     padding-left: 5px;
 }
 
-.form-label
-{
+.form-label {
     font-weight:600;
+}
+
+#secret_file {
+    margin-top: 8px;
+}
+
+.input-group {
+    margin-top: 8px;
 }
