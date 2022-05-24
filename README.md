@@ -150,6 +150,7 @@ Joe Richards <nospam-github@disconformity.net>
 * Upgrade JS libs: jquery@3.6.0, bootstrap@5.0.2, clipboard.js@2.0.10, crypto-js@4.1.1
 * Update look and feel
 * Improved user flow
+* Generate random password by default
 
 ## To Do ##
 

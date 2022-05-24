@@ -57,7 +57,7 @@ function file_select() {
     secret_text = document.getElementById('secret_text');
     if (secret_file.files.length == 1 && secret_file.files[0].name) {
         secret_text.disabled = true;
-        secret_text.placeholder = 'File selected: ' + secret_file.files[0].name;
+        // secret_text.placeholder = 'File selected: ' + secret_file.files[0].name;
     }
     else {
         secret_text.disabled = false;
