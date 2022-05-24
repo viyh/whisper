@@ -10,6 +10,16 @@ import yaml
 logger = logging.getLogger("whisper")
 
 
+class ConfigError(Exception):
+    def __init__(self, config_key="", message="Missing configuration parameter"):
+        self.message = message
+        super().__init__(self.message)
+        self.config_key = config_key
+
+    def __str__(self):
+        return f"{self.message}: {self.config_key}"
+
+
 class secret:
     def __init__(self, secret_id=None, expiration=None, key_pass=None, data=None):
         self.id = secret_id
@@ -61,7 +71,14 @@ class secret:
 
     def is_expired(self):
         now = int(time.time())
-        return self.expire_date and now >= self.expire_date and self.expire_date != -1
+        return (
+            self.expire_date
+            and now >= self.expire_date
+            and (
+                self.expire_date != -1
+                or (self.create_date and now - self.create_date >= 86400 * 30)
+            )
+        )
 
     def is_one_time(self):
         return self.expire_date == -1
@@ -97,7 +114,7 @@ def load_config(config_filenames=["config.default.yaml", "config.yaml"]):
             try:
                 config.update(yaml.safe_load(config_file))
             except yaml.YAMLError as e:
-                logger.error(f"Config error: {e}")
+                raise ConfigError(message=f"Config error: {e}")
     return config
 
 
