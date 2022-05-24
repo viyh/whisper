@@ -19,6 +19,10 @@ function init_tooltip() {
         trigger: 'manual',
         placement: 'right'
     });
+    $('[id=copypwbutton]').tooltip({
+        trigger: 'manual',
+        placement: 'right'
+    });
     $('[id=regenbutton]').tooltip({
         trigger: 'hover',
         placement: 'right'
