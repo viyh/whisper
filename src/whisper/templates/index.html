@@ -29,14 +29,14 @@
                 <hr>
                 <div class="mb-3">
                     <label class="form-label" for="password">Secret Password</label>
-                    <div class="input-group">
+                    <div class="password-group input-group mb-3">
                         <input class="form-control" autocomplete="off" type="text" onclick="this.setSelectionRange(0, this.value.length);" id="password" required>
-                        <span class="input-group-button">
+                        <span class="password-group-button input-group-button">
                             <button type="button" class="btn btn-light inputbtn" id="regenbutton" onclick="document.getElementById('password').value = random_pw();" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Generate new password">
                                 <img class="btnimg regen" id="regenicon" src="assets/regen.svg" alt="Generate new password">
                             </button>
                         </span>
-                        <span class="input-group-button">
+                        <span class="password-group-button input-group-button">
                             <button type="button" class="btn btn-light inputbtn clipbtn" id="copypwbutton" data-clipboard-target="#password" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Copied!">
                                 <img class="btnimg clippy" id="copyicon" src="assets/clippy.svg" alt="Copy to clipboard">
                             </button>
@@ -58,7 +58,7 @@
                     <button class="btn btn-primary" type="submit">Create Secret</button>
                 </div>
             </form>
-            <div class="input-group">
+            <div class="link-group input-group mb-3">
                 <input type="text" class="form-control" id="secret_link" onclick="this.setSelectionRange(0, this.value.length);" readonly>
                 <span class="input-group-button">
                     <button type="button" class="btn btn-light inputbtn clipbtn" id="copybutton" data-clipboard-target="#secret_link" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Copied!">
