@@ -10,7 +10,7 @@ from flask import (
     url_for,
 )
 from werkzeug.middleware.proxy_fix import ProxyFix
-from whisper import load_config, secret
+from whisper import load_config, secret, ConfigError
 from whisper.storage import store
 
 __version__ = "0.1.0"
@@ -117,9 +117,12 @@ def request_entity_too_large(error):
 
 
 config = load_config()
+storage_class = config.get("storage_class")
+if not storage_class:
+    raise ConfigError("storage_class")
 store = store(
     config.get("storage_class"),
-    config.get("storage_config"),
+    config.get("storage_config", {}),
     clean_interval=config.get("storage_clean_interval", 3600),
 )
 store.start()

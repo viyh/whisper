@@ -4,23 +4,37 @@ import os
 
 from google.cloud import storage
 from google.cloud.exceptions import NotFound
-from whisper import secret
+from google.auth.exceptions import TransportError
+from google.api_core.exceptions import RetryError
+from urllib3.exceptions import ConnectTimeoutError, MaxRetryError
+from requests.exceptions import ConnectTimeout
+from whisper import secret, ConfigError
 from whisper.storage import store
 
 logger = logging.getLogger(__name__)
 
 
 class gcs(store):
-    def __init__(self, name="s3", parent=None, bucket_name=None, bucket_path=""):
+    def __init__(
+        self,
+        name="gcp",
+        parent=None,
+        bucket_name=None,
+        bucket_path="",
+        gcp_project=None,
+    ):
         super().__init__(name, parent)
         self.bucket_name = bucket_name
         self.bucket_path = bucket_path
+        self.gcp_project = gcp_project
         if not self.bucket_name:
-            raise (
-                "No bucket name specified, please add storage_config -> bucket_name "
-                "to the config.yaml file."
-            )
-        self.client = storage.Client()
+            raise ConfigError("storage_config -> bucket_name")
+        if not self.gcp_project:
+            raise ConfigError("storage_config -> gcp_project")
+        self._connect()
+
+    def _connect(self):
+        self.client = storage.Client(project=self.gcp_project)
         self.bucket = self.client.get_bucket(self.bucket_name)
 
     def get_secret(self, secret_id):
@@ -44,23 +58,38 @@ class gcs(store):
         return True
 
     def delete_expired(self):
-        store_objs = self.client.list_blobs(self.bucket_name, prefix=self.bucket_path)
+        try:
+            store_objs = list(
+                self.client.list_blobs(self.bucket_name, prefix=self.bucket_path)
+            )
+        except (
+            TimeoutError,
+            TransportError,
+            RetryError,
+            ConnectTimeoutError,
+            MaxRetryError,
+            ConnectTimeout,
+        ) as e:
+            logger.error(f"GCS connection error: {e}")
+            self._connect()
+            logger.error("Reconnected.")
+
         for store_obj in store_objs:
-            secret_id = os.path.splitext(os.path.basename(store_obj.name))[0]
-            s = secret()
-            s.expire_date = self.get_gcs_obj_expire_date(store_obj.name)
-            if s.is_expired():
+            secret_id, ext = os.path.splitext(os.path.basename(store_obj.name))
+            if ext != ".json":
+                continue
+            s = secret(secret_id)
+            s.create_date, s.expire_date = self.get_gcs_obj_dates(store_obj.name)
+            if s.check_id() and s.is_expired():
                 self.delete_secret(secret_id)
 
-    def get_gcs_obj_expire_date(self, full_key):
+    def get_gcs_obj_dates(self, full_key):
         store_obj = self.bucket.get_blob(full_key)
-        logger.debug(f"DEBUG {store_obj.metadata}")
-        if not store_obj.metadata:
-            return False
-        for key, value in store_obj.metadata.items():
-            if key == "expire_date":
-                return int(value)
-        return False
+        if not store_obj or not store_obj.metadata:
+            return False, False
+        create_date = store_obj.metadata.get("create_date", 0)
+        expire_date = store_obj.metadata.get("expire_date", 0)
+        return int(create_date), int(expire_date)
 
     def delete_gcs_obj(self, key):
         full_path = os.path.join(self.bucket_path, key)
@@ -82,7 +111,10 @@ class gcs(store):
             data=bytes(json.dumps(s.__dict__).encode("utf-8")),
             content_type="application/json",
         )
-        store_obj.metadata = {"expire_date": s.expire_date}
+        store_obj.metadata = {
+            "create_date": s.create_date,
+            "expire_date": s.expire_date,
+        }
         store_obj.patch()
         return True
 
