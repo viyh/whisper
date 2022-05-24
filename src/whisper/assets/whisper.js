@@ -2,33 +2,40 @@ function init_clipboard() {
     // Clipboard
     var clipboard = new ClipboardJS('.clipbtn');
     clipboard.on('success', function(e) {
-        setTooltip('Copied!');
-        hideTooltip();
+        var btn = $(e.trigger);
+        setTooltip(btn, 'Copied');
+        hideTooltip(btn);
     });
     clipboard.on('error', function(e) {
-        setTooltip('Failed!');
-        hideTooltip();
+        var btn = $(e.trigger);
+        setTooltip(btn, 'Failed!');
+        hideTooltip(btn);
     });
 }
 
 function init_tooltip() {
     // Tooltip for copied text
-    $('[data-bs-toggle=tooltip]').tooltip({
+    $('[id=copybutton]').tooltip({
         trigger: 'manual',
+        placement: 'right'
+    });
+    $('[id=regenbutton]').tooltip({
+        trigger: 'hover',
         placement: 'right'
     });
 }
 
-function setTooltip(message) {
-    $('[data-bs-toggle=tooltip]').tooltip('hide')
-        .attr('data-original-title', message)
-        .tooltip('show');
-}
-function hideTooltip() {
+function setTooltip(btn, message) {
+    btn.tooltip('hide')
+      .attr('data-original-title', message)
+      .tooltip('show');
+  }
+
+  function hideTooltip(btn) {
     setTimeout(function() {
-        $('[data-bs-toggle=tooltip]').tooltip('hide');
+      btn.tooltip('hide');
     }, 1500);
-}
+  }
 
 // Random password
 function random_pw() {

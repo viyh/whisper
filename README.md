@@ -148,10 +148,10 @@ Joe Richards <nospam-github@disconformity.net>
 * Add storage backends: S3, GCS, local, memory
 * Upgrade to python 3.10
 * Upgrade JS libs: jquery@3.6.0, bootstrap@5.0.2, clipboard.js@2.0.10, crypto-js@4.1.1
+* Update look and feel
+* Improved user flow
 
 ## To Do ##
 
 * Implement rate limiting for requests per minute
-* Update look and feel
-* Dark mode
 * Update documentation

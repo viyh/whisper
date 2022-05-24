@@ -20,7 +20,14 @@
             <form id="form" onsubmit="new_link(event);">
                 <div class="mb-3">
                     <label class="form-label" for="password">Secret Password</label>
-                    <input class="form-control" autocomplete="off" type="text" id="password" required>
+                    <div class="input-group">
+                        <input class="form-control" autocomplete="off" type="text" onclick="this.setSelectionRange(0, this.value.length);" id="password" required>
+                        <span class="input-group-button">
+                            <button type="button" class="btn btn-light inputbtn" id="regenbutton" onclick="document.getElementById('password').value = random_pw();" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Generate new password">
+                                <img class="regen" id="regenicon" src="assets/regen.svg" width="12" alt="Generate new password">
+                            </button>
+                        </span>
+                    </div>
                 </div>
                 <br />
                 <br />
@@ -54,7 +61,7 @@
                 <div class="input-group">
                     <input type="text" class="form-control" id="secret_link" onclick="this.setSelectionRange(0, this.value.length);" readonly>
                     <span class="input-group-button">
-                        <button type="button" class="btn btn-light clipbtn" id="copybutton" data-clipboard-target="#secret_link" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Copied!">
+                        <button type="button" class="btn btn-light inputbtn clipbtn" id="copybutton" data-clipboard-target="#secret_link" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Copied!">
                             <img class="clippy" id="copyicon" src="assets/clippy.svg" width="13" alt="Copy to clipboard">
                         </button>
                     </span>
