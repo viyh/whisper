@@ -38,8 +38,13 @@ function setTooltip(btn, message) {
   }
 
 // Random password
-function random_pw() {
-    return CryptoJS.lib.WordArray.random(16).toString();
+function random_pw(
+    length = 32,
+    wishlist = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz~!@-#$%*?+'
+) {
+    return Array.from(crypto.getRandomValues(new Uint32Array(length)))
+      .map((x) => wishlist[x % wishlist.length])
+      .join('')
 }
 
 // Show filename in textbox
