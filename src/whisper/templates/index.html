@@ -55,7 +55,7 @@
                 </div>
                 <hr>
                 <div class="d-grid gap-2">
-                    <button class="btn btn-primary" type="submit">Create Secret</button>
+                    <button class="btn btn-primary" id="create_secret" type="submit">Create Secret</button>
                 </div>
             </form>
             <div class="link-group input-group mb-3">
@@ -98,6 +98,22 @@
                 init_clipboard();
                 init_tooltip();
             });
+
+            $('#secret_file').on('change', function() {
+                let file_size = this.files[0].size / 1000 / 1000;
+                let max_file_size_mb = parseInt("{{max_file_size_mb}}");
+                let secret_link = document.getElementById("secret_link");
+                let create_secret = document.getElementById("create_secret");
+                if (file_size > max_file_size_mb) {
+                    create_secret.disabled = true;
+                    secret_link.value = 'Maximum file size is ' + max_file_size_mb + " MB.";
+                }
+                else {
+                    create_secret.disabled = false;
+                    secret_link.value = secret_link.defaultValue;
+                }
+            });
+
         </script>
     </body>
 </html>

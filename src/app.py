@@ -34,7 +34,11 @@ def send_assets(path):
 def new_secret():
     """Index page, start a new secret"""
     app.logger.debug(f"[{request.remote_addr}] Index")
-    return render_template("index.html", version=__version__)
+    return render_template(
+        "index.html",
+        version=__version__,
+        max_file_size_mb=config.get("max_data_size_mb", 1),
+    )
 
 
 @app.route("/", methods=["POST"])
