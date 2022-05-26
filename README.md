@@ -126,7 +126,7 @@ The recipient can browse to the link and enter the password to retrieve the text
 
 ## Author ##
 
-Joe Richards <nospam-github@disconformity.net>
+Joe Richards (@viyh)
 
 ## Licence ##
 
