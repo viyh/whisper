@@ -23,15 +23,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * Use CDN JS libs
 * Use config files for configuration
 * Update look and feel
+* Update look and feel for Bootstrap 5
 * Improved user flow (such as focus on load, clipboard buttons, order of fields, etc.)
 * Generate random password by default
-
-### Deprecated
 
 ### Removed
 * DynamoDB support/dependency. DynamoDB stores a max of 400 kB items, so unfeasible for backend with new file support.
 
 ### Fixed
+* Fix grid support for mobile responsiveness ([PR #4](https://github.com/viyh/whisper/pull/4)), by @kdeenanauth
 
 ### Security
 * Use PBKDF2 (salted SHA512, 10000 rounds) for client-side password hashing
