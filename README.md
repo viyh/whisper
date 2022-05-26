@@ -131,28 +131,3 @@ Joe Richards <nospam-github@disconformity.net>
 ## Licence ##
 
 [MIT License](LICENSE)
-
-## Updates ##
-
-* Complete rewrite for pluggable storage backends
-* Use PBKDF2 (salted SHA512, 10000 rounds) for client-side password hashing
-* Use bcrypt for server-side password hashing
-* Add file sharing support
-* Add size limit for files
-* Storage cleaner runs periodically in background
-* Better logging and debugging
-* Run as unprivileged user
-* Simplify crypto
-* Use SHA256 hashes for item paths
-* Use CDN JS libs
-* Add storage backends: S3, GCS, local, memory
-* Upgrade to python 3.10
-* Upgrade JS libs: jquery@3.6.0, bootstrap@5.0.2, clipboard.js@2.0.10, crypto-js@4.1.1
-* Update look and feel
-* Improved user flow
-* Generate random password by default
-
-## To Do ##
-
-* Implement rate limiting for requests per minute
-* Update documentation

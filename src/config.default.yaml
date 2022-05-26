@@ -1,22 +1,60 @@
-debug: True
-app_listen_ip: 0.0.0.0
-app_port: 5000
+###
+### Options
+###
+
+# Maximum file upload size
 max_data_size_mb: 1
+
+# Server level secret key used for additional security when encrypting secrets
 secret_key: 'w7bAyd&zpc#jPUc2Y6K%gbRtuF@M9Y^@'
+
+# Interval in seconds that the secret storage cleaner will run
 storage_clean_interval: 900
 
+# Enable debugging, you will also need to set LOG_LEVEL=DEBUG
+debug: True
+
+# Listen IP within the docker container, generally this shouldn't be changed
+app_listen_ip: 0.0.0.0
+
+# Listen port within the docker container, generally this shouldn't be changed
+app_port: 5000
+
+###
+### Storage Backend
+###
+
+# Choose one of the following stores:
+
+# Local Disk store
+# Writes secrets to given path within the container, so for persistence between
+# containers, make sure to mount an external volumn to the path.
+#
+storage_class: whisper.storage.local.local
+storage_config:
+    path: /tmp/whisper
+
+# In-Memory store
+# Stores secrets in memory only, does not persist secrets between application runs.
+#
 # storage_class: whisper.storage.memory.memory
 # storage_config: {}
 
-# storage_class: whisper.storage.local.local
-# storage_config:
-#     path: /tmp/whisper
-
+# AWS S3 store
+# Stores secrets in a given bucket/path and uses object tags for expiration.
+# Credentials are set from the environment, so either mount the credential files
+# to /.aws within the container or set the normal AWS environment variables.
+#
 # storage_class: whisper.storage.aws.s3
 # storage_config:
 #     bucket_name: my-secret-bucket
 #     bucket_path: secrets
 
+# GCP GCS store
+# Stores secrets in a given bucket/path and uses object tags for expiration.
+# Credentials are set from the environment, so either mount the credential files
+# to /.config within the container or set the normal GCP environment variables.
+#
 # storage_class: whisper.storage.gcp.gcs
 # storage_config:
 #     gcp_project: my-project-name
