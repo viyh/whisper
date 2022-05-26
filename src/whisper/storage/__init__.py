@@ -26,7 +26,7 @@ class store_cleaner:
 
 
 class store:
-    def __init__(self, storage_class, storage_config={}, clean_interval=3600):
+    def __init__(self, storage_class, storage_config={}, clean_interval=900):
         self.storage_class = storage_class
         self.config = storage_config
         self.clean_interval = clean_interval

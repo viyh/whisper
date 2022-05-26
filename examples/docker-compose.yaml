@@ -1,0 +1,23 @@
+version: '3'
+
+services:
+  whisper:
+    image: viyh/whisper:0.1.0
+    container_name: whisper
+    restart: always
+    environment:
+      LOG_LEVEL: DEBUG
+    volumes:
+      - /home/whisper/conf/config.yaml:/usr/src/app/config.yaml:ro
+      - /home/whisper/data:/tmp/whisper
+    networks:
+      - whisper
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "5"
+        max-size: "10m"
+
+networks:
+  whisper:
+    name: whisper
