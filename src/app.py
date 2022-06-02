@@ -1,4 +1,5 @@
 import logging
+import os
 
 from flask import (
     Flask,
@@ -136,5 +137,5 @@ if __name__ == "__main__":
     app.run(
         host=config["app_listen_ip"],
         port=config["app_port"],
-        debug=config["debug"],
+        debug=os.environ.get("LOG_LEVEL", False) == "DEBUG",
     )

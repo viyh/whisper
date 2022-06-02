@@ -11,9 +11,6 @@ secret_key: 'w7bAyd&zpc#jPUc2Y6K%gbRtuF@M9Y^@'
 # Interval in seconds that the secret storage cleaner will run
 storage_clean_interval: 900
 
-# Enable debugging, you will also need to set LOG_LEVEL=DEBUG
-debug: True
-
 # Listen IP within the docker container, generally this shouldn't be changed
 app_listen_ip: 0.0.0.0
 
