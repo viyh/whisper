@@ -11,24 +11,26 @@ logger = logging.getLogger(__name__)
 
 class local(store):
     def __init__(self, name="local", parent=None, path="/tmp/whisper"):
+        self.default_config = {"path": "/tmp/whisper"}
         super().__init__(name, parent)
-        self.path = path
-        if not os.path.exists(self.path):
-            os.makedirs(self.path)
-            logger.info(f"Created directory {self.path}")
+
+    def start(self):
+        if not os.path.exists(self.config.path):
+            os.makedirs(self.config.path)
+            logger.info(f"Created directory {self.config.path}")
 
     def get_secret(self, secret_id):
         s = secret(secret_id)
         if not s.check_id():
             return False
-        secret_filename = os.path.join(self.path, f"{s.id}.json")
+        secret_filename = os.path.join(self.config.path, f"{s.id}.json")
         logger.debug(f"Reading secret from file: {secret_filename}")
         return self.secret_from_file(secret_filename)
 
     def set_secret(self, s):
         if not s.check_id():
             return False
-        secret_filename = os.path.join(self.path, f"{s.id}.json")
+        secret_filename = os.path.join(self.config.path, f"{s.id}.json")
         with open(secret_filename, "w") as secret_file:
             json.dump(s.__dict__, secret_file)
         logger.debug(f"Saving secret: {secret_filename}")
@@ -36,7 +38,7 @@ class local(store):
 
     def delete_secret(self, secret_id):
         s = secret(secret_id)
-        secret_filename = os.path.join(self.path, f"{s.id}.json")
+        secret_filename = os.path.join(self.config.path, f"{s.id}.json")
         if not s or not s.check_id() or not os.path.exists(secret_filename):
             return True
         logger.info(f"Deleting secret: {secret_id}")
@@ -58,7 +60,7 @@ class local(store):
         return s
 
     def delete_expired(self):
-        secret_filenames = glob.glob(os.path.join(self.path, "*.json"))
+        secret_filenames = glob.glob(os.path.join(self.config.path, "*.json"))
         for secret_filename in secret_filenames:
             secret_id = os.path.splitext(os.path.basename(secret_filename))[0]
             s = self.secret_from_file(secret_filename)

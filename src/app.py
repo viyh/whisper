@@ -11,7 +11,7 @@ from flask import (
     url_for,
 )
 from werkzeug.middleware.proxy_fix import ProxyFix
-from whisper import load_config, secret, ConfigError
+from whisper import load_config, secret
 from whisper.storage import store
 
 __version__ = "0.1.0"
@@ -38,7 +38,7 @@ def new_secret():
     return render_template(
         "index.html",
         version=__version__,
-        max_file_size_mb=config.get("max_data_size_mb", 1),
+        max_file_size_mb=config.max_data_size_mb,
     )
 
 
@@ -52,7 +52,7 @@ def create_secret():
     s = secret()
     s.create(
         expiration=request.json["expiration"],
-        key_pass=s.get_key_pass(request.json["password"], config.get("secret_key")),
+        key_pass=s.get_key_pass(request.json["password"], config.secret_key),
         data=request.json["encrypted_data"],
     )
     app.logger.info(f"[{request.remote_addr}] Secret create: {s.id}")
@@ -89,7 +89,7 @@ def show_secret(secret_id):
         return jsonify({"result": "Invalid ID"})
 
     # check the password
-    key_pass = s.get_key_pass(request.json["password"], config.get("secret_key"))
+    key_pass = s.get_key_pass(request.json["password"], config.secret_key)
     if not s.check_password(key_pass):
         app.logger.info(f"[{request.remote_addr}] Secret invalid password: {s.id}")
         return jsonify({"result": "Invalid password."})
@@ -112,30 +112,25 @@ def not_found(error):
 def request_entity_too_large(error):
     return (
         jsonify(
-            {
-                "result": "Maximum file upload size is "
-                f"{config.get('max_data_size_mb', 1)} MB"
-            }
+            {"result": "Maximum file upload size is " f"{config.max_data_size_mb} MB"}
         ),
         413,
     )
 
 
-config = load_config()
-storage_class = config.get("storage_class")
-if not storage_class:
-    raise ConfigError("storage_class")
+config_filename = os.environ.get("CONFIG_FILE", "config.yaml")
+config = load_config(config_filenames=[config_filename])
 store = store(
-    config.get("storage_class"),
-    config.get("storage_config", {}),
-    clean_interval=config.get("storage_clean_interval", 3600),
+    config.storage_class,
+    config.storage_config,
+    clean_interval=config.storage_clean_interval,
 )
 store.start()
-app.config["MAX_CONTENT_LENGTH"] = config.get("max_data_size_mb", 1) * 1000 * 1000
+app.config["MAX_CONTENT_LENGTH"] = config.max_data_size_mb * 1000 * 1000
 
 if __name__ == "__main__":
     app.run(
-        host=config["app_listen_ip"],
-        port=config["app_port"],
+        host=config.app_listen_ip,
+        port=config.app_port,
         debug=os.environ.get("LOG_LEVEL", False) == "DEBUG",
     )

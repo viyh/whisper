@@ -8,34 +8,24 @@ from google.auth.exceptions import TransportError
 from google.api_core.exceptions import RetryError
 from urllib3.exceptions import ConnectTimeoutError, MaxRetryError
 from requests.exceptions import ConnectTimeout
-from whisper import secret, ConfigError
+from whisper import secret
 from whisper.storage import store
 
 logger = logging.getLogger(__name__)
 
 
 class gcs(store):
-    def __init__(
-        self,
-        name="gcp",
-        parent=None,
-        bucket_name=None,
-        bucket_path="",
-        gcp_project=None,
-    ):
+    def __init__(self, name="gcp", parent=None):
+        self.default_config = {
+            "bucket_name": None,
+            "bucket_path": "",
+            "gcp_project": None,
+        }
         super().__init__(name, parent)
-        self.bucket_name = bucket_name
-        self.bucket_path = bucket_path
-        self.gcp_project = gcp_project
-        if not self.bucket_name:
-            raise ConfigError("storage_config -> bucket_name")
-        if not self.gcp_project:
-            raise ConfigError("storage_config -> gcp_project")
-        self._connect()
 
-    def _connect(self):
-        self.client = storage.Client(project=self.gcp_project)
-        self.bucket = self.client.get_bucket(self.bucket_name)
+    def start(self):
+        self.client = storage.Client(project=self.config.gcp_project)
+        self.bucket = self.client.get_bucket(self.config.bucket_name)
 
     def get_secret(self, secret_id):
         s = secret(secret_id)
@@ -60,7 +50,9 @@ class gcs(store):
     def delete_expired(self):
         try:
             store_objs = list(
-                self.client.list_blobs(self.bucket_name, prefix=self.bucket_path)
+                self.client.list_blobs(
+                    self.config.bucket_name, prefix=self.config.bucket_path
+                )
             )
         except (
             TimeoutError,
@@ -92,7 +84,7 @@ class gcs(store):
         return int(create_date), int(expire_date)
 
     def delete_gcs_obj(self, key):
-        full_path = os.path.join(self.bucket_path, key)
+        full_path = os.path.join(self.config.bucket_path, key)
         try:
             self.bucket.delete_blob(full_path)
         except NotFound:
@@ -100,7 +92,7 @@ class gcs(store):
         return True
 
     def get_gcs_obj(self, key):
-        full_path = os.path.join(self.bucket_path, key)
+        full_path = os.path.join(self.config.bucket_path, key)
         store_obj = self.bucket.get_blob(full_path)
         return store_obj
 

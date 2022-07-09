@@ -3,19 +3,18 @@ import logging
 import os
 
 import boto3
-from whisper import secret, ConfigError
+from whisper import secret
 from whisper.storage import store
 
 logger = logging.getLogger(__name__)
 
 
 class s3(store):
-    def __init__(self, name="s3", parent=None, bucket_name=None, bucket_path=""):
+    def __init__(self, name="s3", parent=None):
+        self.default_config = {"bucket_name": None, "bucket_path": ""}
         super().__init__(name, parent)
-        self.bucket_name = bucket_name
-        self.bucket_path = bucket_path
-        if not self.bucket_name:
-            raise ConfigError("storage_config -> bucket_name")
+
+    def start(self):
         self.client = boto3.client("s3")
 
     def get_secret(self, secret_id):
@@ -40,7 +39,7 @@ class s3(store):
 
     def delete_expired(self):
         store_objs = self.client.list_objects_v2(
-            Bucket=self.bucket_name, Prefix=self.bucket_path
+            Bucket=self.config.bucket_name, Prefix=self.config.bucket_path
         )
         for store_obj in store_objs.get("Contents", []):
             secret_id, ext = os.path.splitext(os.path.basename(store_obj["Key"]))
@@ -53,7 +52,7 @@ class s3(store):
 
     def get_s3_obj_dates(self, full_key):
         tagset = self.client.get_object_tagging(
-            Bucket=self.bucket_name, Key=full_key
+            Bucket=self.config.bucket_name, Key=full_key
         ).get("TagSet")
         create_date, expire_date = 0, 0
         for tag in tagset:
@@ -64,26 +63,28 @@ class s3(store):
         return create_date, expire_date
 
     def delete_s3_obj(self, key):
-        full_path = os.path.join(self.bucket_path, key)
+        full_path = os.path.join(self.config.bucket_path, key)
         try:
-            self.client.delete_object(Bucket=self.bucket_name, Key=full_path)
+            self.client.delete_object(Bucket=self.config.bucket_name, Key=full_path)
         except self.client.exceptions.NoSuchKey:
             pass
         return True
 
     def get_s3_obj(self, key):
-        full_path = os.path.join(self.bucket_path, key)
+        full_path = os.path.join(self.config.bucket_path, key)
         try:
-            store_obj = self.client.get_object(Bucket=self.bucket_name, Key=full_path)
+            store_obj = self.client.get_object(
+                Bucket=self.config.bucket_name, Key=full_path
+            )
         except self.client.exceptions.NoSuchKey:
             return False
         return store_obj
 
     def put_s3_obj(self, s):
-        full_path = os.path.join(self.bucket_path, f"{s.id}.json")
+        full_path = os.path.join(self.config.bucket_path, f"{s.id}.json")
         self.client.put_object(
             Body=bytes(json.dumps(s.__dict__).encode("utf-8")),
-            Bucket=self.bucket_name,
+            Bucket=self.config.bucket_name,
             Key=full_path,
             Tagging=f"create_date={s.create_date}&expire_date={s.expire_date}",
         )
