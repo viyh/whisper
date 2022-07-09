@@ -7,7 +7,10 @@ logger = logging.getLogger(__name__)
 
 class memory(store):
     def __init__(self, name="memory", parent=None):
+        self.default_config = {}
         super().__init__(name, parent)
+
+    def start(self):
         self.secrets = {}
 
     def get_secret(self, secret_id):

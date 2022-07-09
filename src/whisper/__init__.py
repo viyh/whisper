@@ -10,8 +10,50 @@ import yaml
 logger = logging.getLogger("whisper")
 
 
+class AttrDict(dict):
+    def __init__(self, mapping=None):
+        super(AttrDict, self).__init__()
+        if mapping is not None:
+            for key, value in mapping.items():
+                self.__setitem__(key, value)
+
+    def __setitem__(self, key, value):
+        if isinstance(value, dict):
+            value = AttrDict(value)
+        super(AttrDict, self).__setitem__(key, value)
+        self.__dict__[key] = value
+
+    def __getattr__(self, item):
+        try:
+            return self.__getitem__(item)
+        except KeyError:
+            raise AttributeError(item)
+
+    __setattr__ = __setitem__
+
+
 class ConfigError(Exception):
+    def __init__(self, config_key="", message="Configuration error"):
+        self.message = message
+        super().__init__(self.message)
+        self.config_key = config_key
+
+    def __str__(self):
+        return f"{self.message}: {self.config_key}"
+
+
+class ConfigMissingError(Exception):
     def __init__(self, config_key="", message="Missing configuration parameter"):
+        self.message = message
+        super().__init__(self.message)
+        self.config_key = config_key
+
+    def __str__(self):
+        return f"{self.message}: {self.config_key}"
+
+
+class ConfigUnknownError(Exception):
+    def __init__(self, config_key="", message="Unknown configuration parameter"):
         self.message = message
         super().__init__(self.message)
         self.config_key = config_key
@@ -104,8 +146,32 @@ class secret:
         self.hash = bcrypt.hashpw(key_pass, salt).decode("utf-8")
 
 
-def load_config(config_filenames=["config.default.yaml", "config.yaml"]):
-    config = {}
+def check_config(config_dict, default_config_dict):
+    # check that all keys in the default config have a value set in the config
+    for k, v in default_config_dict.items():
+        if config_dict.get(k) is None:
+            raise ConfigError(k, "Missing configuration parameter")
+
+    # check that no extra configuration keys are set
+    for k, v in config_dict.items():
+        if k not in default_config_dict.keys():
+            raise ConfigError(k, "Unknown configuration parameter")
+
+    return AttrDict(config_dict)
+
+
+def load_config(config_filenames=["config.yaml"]):
+    default_config = {
+        "secret_key": None,
+        "storage_class": None,
+        "storage_config": {},
+        "storage_clean_interval": 900,
+        "max_data_size_mb": 1,
+        "app_listen_ip": "0.0.0.0",
+        "app_port": "5000",
+    }
+
+    config = default_config
     for config_filename in config_filenames:
         if not os.path.exists(config_filename):
             logger.error(f"Config file does not exist, skipping. {config_filename}")
@@ -115,7 +181,7 @@ def load_config(config_filenames=["config.default.yaml", "config.yaml"]):
                 config.update(yaml.safe_load(config_file))
             except yaml.YAMLError as e:
                 raise ConfigError(message=f"Config error: {e}")
-    return config
+    return check_config(config, default_config)
 
 
 def class_loader(classname, *args, **kwargs):

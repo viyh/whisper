@@ -2,7 +2,7 @@ import logging
 import threading
 import time
 
-from whisper import class_loader, secret
+from whisper import class_loader, secret, check_config
 
 logger = logging.getLogger(__name__)
 
@@ -27,17 +27,19 @@ class store_cleaner:
 
 class store:
     def __init__(self, storage_class, storage_config={}, clean_interval=900):
-        self.storage_class = storage_class
-        self.config = storage_config
         self.clean_interval = clean_interval
+        self.storage_class = storage_class
+        self.storage_config = storage_config
 
     def start(self):
         self.backend = class_loader(
             self.storage_class,
             "store",
             parent=self,
-            **self.config,
         )
+        config = {**self.backend.default_config, **self.storage_config}
+        self.backend.config = check_config(config, self.backend.default_config)
+        self.backend.start()
         self.cleaner = store_cleaner(self)
 
     def get_secret(self, secret_id):
