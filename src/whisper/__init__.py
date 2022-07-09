@@ -10,6 +10,17 @@ import yaml
 logger = logging.getLogger("whisper")
 
 
+class UniqueKeyLoader(yaml.SafeLoader):
+    def construct_mapping(self, node, deep=False):
+        mapping = set()
+        for key_node, value_node in node.value:
+            key = self.construct_object(key_node, deep=deep)
+            if key in mapping:
+                raise ValueError(key)
+            mapping.add(key)
+        return super().construct_mapping(node, deep)
+
+
 class AttrDict(dict):
     def __init__(self, mapping=None):
         super(AttrDict, self).__init__()
@@ -42,24 +53,14 @@ class ConfigError(Exception):
         return f"{self.message}: {self.config_key}"
 
 
-class ConfigMissingError(Exception):
+class ConfigMissingError(ConfigError):
     def __init__(self, config_key="", message="Missing configuration parameter"):
-        self.message = message
         super().__init__(self.message)
-        self.config_key = config_key
-
-    def __str__(self):
-        return f"{self.message}: {self.config_key}"
 
 
 class ConfigUnknownError(Exception):
     def __init__(self, config_key="", message="Unknown configuration parameter"):
-        self.message = message
         super().__init__(self.message)
-        self.config_key = config_key
-
-    def __str__(self):
-        return f"{self.message}: {self.config_key}"
 
 
 class secret:
@@ -150,12 +151,12 @@ def check_config(config_dict, default_config_dict):
     # check that all keys in the default config have a value set in the config
     for k, v in default_config_dict.items():
         if config_dict.get(k) is None:
-            raise ConfigError(k, "Missing configuration parameter")
+            raise ConfigMissingError(k, "Missing configuration parameter")
 
     # check that no extra configuration keys are set
     for k, v in config_dict.items():
         if k not in default_config_dict.keys():
-            raise ConfigError(k, "Unknown configuration parameter")
+            raise ConfigUnknownError(k, "Unknown configuration parameter")
 
     return AttrDict(config_dict)
 
@@ -178,7 +179,11 @@ def load_config(config_filenames=["config.yaml"]):
             continue
         with open(config_filename, "r") as config_file:
             try:
-                config.update(yaml.safe_load(config_file))
+                config.update(yaml.load(config_file, Loader=UniqueKeyLoader))
+            except ValueError as e:
+                raise ConfigError(
+                    config_key=e, message="Duplicate key in configuration file"
+                )
             except yaml.YAMLError as e:
                 raise ConfigError(message=f"Config error: {e}")
     return check_config(config, default_config)
