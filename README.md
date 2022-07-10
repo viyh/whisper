@@ -57,8 +57,8 @@ config.yaml file.
 
 ### Create a volume (optional) ###
 
-If using memory, S3, or GCS, no persistent storage is needed. If using local
-disk storage, then a volume will need to be created and mounted to persist data
+If using memory, S3, or GCS, no storage volume is needed. If using local disk
+storage, then a volume will need to be created and mounted to persist data
 between application executions.
 
 To create a docker volume:
