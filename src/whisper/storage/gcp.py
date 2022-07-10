@@ -2,12 +2,12 @@ import json
 import logging
 import os
 
+from google.api_core.exceptions import RetryError
+from google.auth.exceptions import TransportError
 from google.cloud import storage
 from google.cloud.exceptions import NotFound
-from google.auth.exceptions import TransportError
-from google.api_core.exceptions import RetryError
-from urllib3.exceptions import ConnectTimeoutError, MaxRetryError
 from requests.exceptions import ConnectTimeout
+from urllib3.exceptions import ConnectTimeoutError, MaxRetryError
 from whisper import secret
 from whisper.storage import store
 
@@ -97,7 +97,7 @@ class gcs(store):
         return store_obj
 
     def put_gcs_obj(self, s):
-        full_path = os.path.join(self.bucket_path, f"{s.id}.json")
+        full_path = os.path.join(self.config.bucket_path, f"{s.id}.json")
         store_obj = self.bucket.blob(full_path)
         store_obj.upload_from_string(
             data=bytes(json.dumps(s.__dict__).encode("utf-8")),

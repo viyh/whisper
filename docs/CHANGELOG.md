@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * Add storage backends: S3, GCS, local, memory
 * Add file sharing support
 * Add size limit for files
+* Support web URL sub paths
 
 ### Changed
 * Storage cleaner runs periodically in background
@@ -22,10 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * Upgrade JS libs: jquery@3.6.0, bootstrap@5.0.2, clipboard.js@2.0.10, crypto-js@4.1.1
 * Use CDN JS libs
 * Use config files for configuration
-* Update look and feel
 * Update look and feel for Bootstrap 5
 * Improved user flow (such as focus on load, clipboard buttons, order of fields, etc.)
 * Generate random password by default
+* Better config parsing. Check for default config parameters or extra keys.
+* Updated documentation: README, in-line code
 
 ### Removed
 * DynamoDB support/dependency. DynamoDB stores a max of 400 kB items, so unfeasible for backend with new file support.

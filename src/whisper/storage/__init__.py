@@ -2,12 +2,15 @@ import logging
 import threading
 import time
 
-from whisper import class_loader, secret, check_config
+from whisper import check_config, class_loader, secret
 
 logger = logging.getLogger(__name__)
 
 
 class store_cleaner:
+    """Storage cleaner class, deletes expired secrets by running a periodic
+    expiration check"""
+
     def __init__(self, store):
         logger.debug("Cleaner - Init")
         self.store = store
@@ -18,6 +21,7 @@ class store_cleaner:
             self.thread.start()
 
     def run(self):
+        """Run the cleaner loop, sleep for clean_interval between runs"""
         while True:
             logger.info("Cleaner - Deleting expired secrets")
             self.store.delete_expired()
@@ -26,12 +30,18 @@ class store_cleaner:
 
 
 class store:
+    """Storage base class, stores secrets in a backend"""
+
     def __init__(self, storage_class, storage_config={}, clean_interval=900):
         self.clean_interval = clean_interval
         self.storage_class = storage_class
         self.storage_config = storage_config
 
     def start(self):
+        """Import/create configured backend storage object, check the
+        configuration for that specific backend, then start the backend and
+        cleaner loop.
+        """
         self.backend = class_loader(
             self.storage_class,
             "store",
@@ -43,6 +53,7 @@ class store:
         self.cleaner = store_cleaner(self)
 
     def get_secret(self, secret_id):
+        """Retrieve a secret from the storage backend"""
         s = self.backend.get_secret(secret_id)
         if isinstance(s, secret) and s.check_id():
             return s
@@ -50,11 +61,14 @@ class store:
             return False
 
     def set_secret(self, secret):
+        """Save a secret to the storage backend"""
         return self.backend.set_secret(secret)
 
     def delete_secret(self, secret_id):
+        """Delete a secret from the storage backend"""
         logger.info(f"Delete secret: {secret_id}")
         return self.backend.delete_secret(secret_id)
 
     def delete_expired(self):
+        """Delete expired secrets from the storage backend"""
         return self.backend.delete_expired()

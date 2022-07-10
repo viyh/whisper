@@ -11,6 +11,7 @@ from flask import (
     url_for,
 )
 from werkzeug.middleware.proxy_fix import ProxyFix
+
 from whisper import load_config, secret
 from whisper.storage import store
 
@@ -24,14 +25,18 @@ if __name__ != "__main__":
     app.logger.handlers = gunicorn_logger.handlers
     app.logger.setLevel(gunicorn_logger.level)
 
+# load configuration file
+config_filename = os.environ.get("CONFIG_FILE", "config.yaml")
+config = load_config(config_filenames=[config_filename])
 
-@app.route("/assets/<path:path>")
+
+@app.route(f"{config.app_url_base}assets/<path:path>")
 def send_assets(path):
     """Serve asset files."""
     return send_from_directory("assets", path)
 
 
-@app.route("/", methods=["GET"])
+@app.route(f"{config.app_url_base}", methods=["GET"])
 def new_secret():
     """Index page, start a new secret"""
     app.logger.debug(f"[{request.remote_addr}] Index")
@@ -42,7 +47,7 @@ def new_secret():
     )
 
 
-@app.route("/", methods=["POST"])
+@app.route(f"{config.app_url_base}", methods=["POST"])
 def create_secret():
     """Create a new secret"""
     # This has to be here in order for Flask to check against MAX_CONTENT_LENGTH
@@ -61,7 +66,7 @@ def create_secret():
     return jsonify({"id": s.id})
 
 
-@app.route("/<string:secret_id>", methods=["GET"])
+@app.route(f"{config.app_url_base}<string:secret_id>", methods=["GET"])
 def get_secret(secret_id):
     """Display page to retrieve secret"""
     # get secret object if it exists in storage
@@ -77,7 +82,7 @@ def get_secret(secret_id):
         return redirect(url_for("new_secret"))
 
 
-@app.route("/<string:secret_id>", methods=["POST"])
+@app.route(f"{config.app_url_base}<string:secret_id>", methods=["POST"])
 def show_secret(secret_id):
     """Retrieve encrypted data."""
     # get secret
@@ -118,17 +123,19 @@ def request_entity_too_large(error):
     )
 
 
-config_filename = os.environ.get("CONFIG_FILE", "config.yaml")
-config = load_config(config_filenames=[config_filename])
+# load backend store
 store = store(
     config.storage_class,
     config.storage_config,
     clean_interval=config.storage_clean_interval,
 )
 store.start()
+
+# set max content length
 app.config["MAX_CONTENT_LENGTH"] = config.max_data_size_mb * 1000 * 1000
 
 if __name__ == "__main__":
+    # run the app
     app.run(
         host=config.app_listen_ip,
         port=config.app_port,
