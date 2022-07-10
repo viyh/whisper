@@ -391,6 +391,13 @@ and checks each secret to see if it is expired and deletes any that are expired.
 
 Example skeleton class:
 ```
+import logging
+
+from whisper.storage import store
+
+logger = logging.getLogger(__name__)
+
+
 class dummy(store):
     def __init__(self, name="dummy", parent=None):
         self.default_config = {}
