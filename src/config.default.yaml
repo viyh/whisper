@@ -17,6 +17,9 @@ app_listen_ip: 0.0.0.0
 # Listen port within the docker container, generally this shouldn't be changed
 app_port: 5000
 
+# Base URL path for app, defaults to root
+app_url_base: /
+
 ###
 ### Storage Backend
 ###

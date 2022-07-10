@@ -135,7 +135,7 @@ function new_link(event) {
     }
 
     function success (response) {
-        secret_link.value = location.origin + '/' + response['id'];
+        secret_link.value = location.origin + location.pathname + response['id'];
         document.getElementById('copybutton').click();
     }
     function failure (response) {
