@@ -1,4 +1,4 @@
-Flask==2.1.2
+Flask==2.3.2
 Flask-Cors==3.0.10
 boto3==1.22.13
 botocore==1.25.13
