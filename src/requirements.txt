@@ -11,7 +11,7 @@ google-resumable-media==2.3.3
 google-cloud-core==2.3.0
 google-api-core==2.8.0
 google-auth==2.6.6
-requests==2.27.1
+requests==2.31.0
 googleapis-common-protos==1.56.1
 cachetools==5.1.0
 rsa==4.8
