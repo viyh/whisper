@@ -69,6 +69,11 @@ class store:
         logger.info(f"Delete secret: {secret_id}")
         return self.backend.delete_secret(secret_id)
 
+    def claim_secret(self, secret_id):
+        """Atomically claim a one-time secret (delete and return True if it existed).
+        Returns True if this caller won the race, False otherwise."""
+        return self.backend.claim_secret(secret_id)
+
     def delete_expired(self):
         """Delete expired secrets from the storage backend"""
         return self.backend.delete_expired()

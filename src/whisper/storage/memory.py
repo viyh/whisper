@@ -1,4 +1,5 @@
 import logging
+import threading
 
 from whisper.storage import store
 
@@ -8,6 +9,7 @@ logger = logging.getLogger(__name__)
 class memory(store):
     def __init__(self, name="memory", parent=None):
         self.default_config = {}
+        self._lock = threading.Lock()
         super().__init__(name, parent)
 
     def start(self):
@@ -30,6 +32,11 @@ class memory(store):
         logger.info(f"Deleting memory secret: {secret_id}")
         self.secrets.pop(secret_id, None)
         return True
+
+    def claim_secret(self, secret_id):
+        """Atomically remove a one-time secret. Returns True if this caller won."""
+        with self._lock:
+            return self.secrets.pop(secret_id, None) is not None
 
     def delete_expired(self):
         to_delete = []

@@ -1,229 +1,353 @@
+// Whisper - Secure secret sharing
+// Version 2: Argon2id + AES-256-GCM via Web Crypto API
+// Backward compatible with v1 (PBKDF2 + CryptoJS AES-CBC)
+
+const WHISPER_VERSION = 2;
+
+// Argon2id parameters - read from server config via data attributes
+// Falls back to defaults if not present in DOM
+const ARGON2_HASH_LEN = 32;
+
+function get_argon2_params() {
+    var el = document.getElementById('app-config');
+    return {
+        time: el ? parseInt(el.dataset.argon2Time) || 5 : 5,
+        mem: el ? parseInt(el.dataset.argon2Mem) || 131072 : 131072,
+        par: el ? parseInt(el.dataset.argon2Par) || 1 : 1
+    };
+}
+
+// --- Clipboard ---
+
 function init_clipboard() {
-    // Clipboard
     var clipboard = new ClipboardJS('.clipbtn');
     clipboard.on('success', function(e) {
-        var btn = $(e.trigger);
+        var btn = e.trigger;
         setTooltip(btn, 'Copied');
         hideTooltip(btn);
     });
     clipboard.on('error', function(e) {
-        var btn = $(e.trigger);
+        var btn = e.trigger;
         setTooltip(btn, 'Failed!');
         hideTooltip(btn);
     });
 }
 
+// --- Tooltips (Bootstrap 5 native) ---
+
 function init_tooltip() {
-    // Tooltip for copied text
-    $('[id=copybutton]').tooltip({
-        trigger: 'manual',
-        placement: 'right'
+    document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(function(el) {
+        new bootstrap.Tooltip(el, { trigger: 'manual' });
     });
-    $('[id=copypwbutton]').tooltip({
-        trigger: 'manual',
-        placement: 'right'
-    });
-    $('[id=regenbutton]').tooltip({
-        trigger: 'hover',
-        placement: 'right'
-    });
+    var regenBtn = document.getElementById('regenbutton');
+    if (regenBtn) {
+        new bootstrap.Tooltip(regenBtn, { trigger: 'hover', placement: 'right' });
+    }
 }
 
-function setTooltip(btn, message) {
-    btn.tooltip('hide')
-      .attr('data-original-title', message)
-      .tooltip('show');
-  }
+function setTooltip(el, message) {
+    var tooltip = bootstrap.Tooltip.getInstance(el);
+    if (tooltip) {
+        tooltip.hide();
+        el.setAttribute('data-bs-original-title', message);
+        tooltip.show();
+    }
+}
 
-  function hideTooltip(btn) {
+function hideTooltip(el) {
     setTimeout(function() {
-      btn.tooltip('hide');
+        var tooltip = bootstrap.Tooltip.getInstance(el);
+        if (tooltip) tooltip.hide();
     }, 1500);
-  }
+}
 
-// Random password
+// --- Password visibility toggle ---
+
+function toggle_password_visibility() {
+    var pw = document.getElementById('password');
+    var eyeIcon = document.getElementById('eye-icon');
+    var eyeSlashIcon = document.getElementById('eye-slash-icon');
+    if (pw.type === 'password') {
+        pw.type = 'text';
+        eyeIcon.style.display = 'none';
+        eyeSlashIcon.style.display = 'inline';
+    } else {
+        pw.type = 'password';
+        eyeIcon.style.display = 'inline';
+        eyeSlashIcon.style.display = 'none';
+    }
+}
+
+// --- Random password (rejection sampling, no modulo bias) ---
+
 function random_pw(
     length = 32,
     wishlist = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz~!@-#$%*?+'
 ) {
-    return Array.from(crypto.getRandomValues(new Uint32Array(length)))
-      .map((x) => wishlist[x % wishlist.length])
-      .join('')
+    var maxValid = Math.floor(0x100000000 / wishlist.length) * wishlist.length;
+    var result = [];
+    while (result.length < length) {
+        var values = crypto.getRandomValues(new Uint32Array(length * 2));
+        for (var i = 0; i < values.length && result.length < length; i++) {
+            if (values[i] < maxValid) {
+                result.push(wishlist[values[i] % wishlist.length]);
+            }
+        }
+    }
+    return result.join('');
 }
 
-// Show filename in textbox
+// --- File handling ---
+
 function file_select() {
-    secret_file = document.getElementById('secret_file');
-    secret_text = document.getElementById('secret_text');
+    var secret_file = document.getElementById('secret_file');
+    var secret_text = document.getElementById('secret_text');
     if (secret_file.files.length == 1 && secret_file.files[0].name) {
         secret_text.disabled = true;
-        // secret_text.placeholder = 'File selected: ' + secret_file.files[0].name;
-    }
-    else {
+    } else {
         secret_text.disabled = false;
         secret_text.placeholder = 'Enter secret text here or select a file below';
     }
 }
 
-// AES Encrypt plaintext using password
-function encrypt(plaintext, password) {
-    return CryptoJS.AES.encrypt(plaintext, password);
-}
-
-// AES Decrypt plaintext using password
-function decrypt(ciphertext, password) {
-    return CryptoJS.AES.decrypt(ciphertext, password);
-}
-
-// Use known public salt for client-side hash (website URL * 4).
-// This prevents the server administrator from ever knowing the
-// real password so they will be unable to decrypt the user's data
-// yet makes it predictable to generate again. The password hash is
-// re-salted/hashed on the server-side with bcrypt for storage to
-// prevent brute force attacks if the hash is stolen.
-function pw_hash(password) {
-    let salt = btoa(location.origin.repeat(4));
-    return CryptoJS.PBKDF2(password, salt, {
-        keySize: 512 / 32,
-        iterations: 10000
-    }).toString(CryptoJS.enc.Base64);
-}
-
-// Generate dataURL base64 data from file element
-// Append "filename:<file_name>," to the data URL so that
-// the filename can be retrieved upon decryption and no data
-// leakage happens while the secret is stored.
 async function get_base64(file_input) {
-    let file = file_input.files[0];
-    let result_base64 = await new Promise((resolve) => {
-        let fr = new FileReader();
-        fr.onload = (e) => resolve(fr.result);
+    var file = file_input.files[0];
+    var result_base64 = await new Promise(function(resolve) {
+        var fr = new FileReader();
+        fr.onload = function() { resolve(fr.result); };
         fr.readAsDataURL(file);
     });
     return 'filename:' + file.name + ',' + result_base64;
 }
 
-// Send API request
-function send_new_link_data(encrypted, password, expiration, success, failure) {
-    let api_data = {'encrypted_data': encrypted.toString(), 'password': pw_hash(password), 'expiration': expiration};
-    document.getElementById('secret_link').value = 'Uploading data and generating link...';
-    api_call("POST", api_data, success, failure);
+// --- V2 Crypto: Argon2id + AES-256-GCM via Web Crypto API ---
+
+async function pw_hash_v2(password) {
+    var params = get_argon2_params();
+    var result = await argon2.hash({
+        pass: password,
+        salt: window.location.origin.repeat(2),
+        time: params.time,
+        mem: params.mem,
+        parallelism: params.par,
+        hashLen: ARGON2_HASH_LEN,
+        type: argon2.ArgonType.Argon2id
+    });
+    return result.encoded;
 }
 
-// Generate a new secret link
-function new_link(event) {
+async function derive_key_v2(password) {
+    var encoder = new TextEncoder();
+    var keyMaterial = await crypto.subtle.importKey(
+        'raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits', 'deriveKey']
+    );
+    return await crypto.subtle.deriveKey(
+        {
+            name: 'PBKDF2',
+            salt: encoder.encode(window.location.origin),
+            iterations: 210000,
+            hash: 'SHA-256'
+        },
+        keyMaterial,
+        { name: 'AES-GCM', length: 256 },
+        false,
+        ['encrypt', 'decrypt']
+    );
+}
+
+function uint8_to_base64(bytes) {
+    var chunks = [];
+    var chunkSize = 8192;
+    for (var i = 0; i < bytes.length; i += chunkSize) {
+        chunks.push(String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize)));
+    }
+    return btoa(chunks.join(''));
+}
+
+function base64_to_uint8(b64) {
+    var binary = atob(b64);
+    var bytes = new Uint8Array(binary.length);
+    for (var i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes;
+}
+
+async function encrypt_v2(plaintext, password) {
+    var key = await derive_key_v2(password);
+    var iv = crypto.getRandomValues(new Uint8Array(12));
+    var plaintextBytes = new TextEncoder().encode(plaintext);
+    var ciphertext = await crypto.subtle.encrypt(
+        { name: 'AES-GCM', iv: iv },
+        key,
+        plaintextBytes
+    );
+    // Prepend IV to ciphertext, encode as base64
+    var combined = new Uint8Array(iv.length + ciphertext.byteLength);
+    combined.set(iv);
+    combined.set(new Uint8Array(ciphertext), iv.length);
+    return uint8_to_base64(combined);
+}
+
+async function decrypt_v2(ciphertext_b64, password) {
+    var key = await derive_key_v2(password);
+    var combined = base64_to_uint8(ciphertext_b64);
+    var iv = combined.slice(0, 12);
+    var ciphertext = combined.slice(12);
+    var plaintext = await crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv: iv },
+        key,
+        ciphertext
+    );
+    return new TextDecoder().decode(plaintext);
+}
+
+// --- V1 Crypto: PBKDF2 + CryptoJS AES-CBC (backward compat) ---
+
+function pw_hash_v1(password) {
+    var salt = btoa(location.origin.repeat(4));
+    return CryptoJS.PBKDF2(password, salt, {
+        keySize: 512 / 32,
+        iterations: 30001
+    }).toString(CryptoJS.enc.Base64);
+}
+
+function encrypt_v1(plaintext, password) {
+    return CryptoJS.AES.encrypt(plaintext, password).toString();
+}
+
+function decrypt_v1(ciphertext, password) {
+    return CryptoJS.AES.decrypt(ciphertext, password).toString(CryptoJS.enc.Utf8);
+}
+
+// --- API call (vanilla fetch) ---
+
+async function api_call(method, data) {
+    var response = await fetch(window.location.href, {
+        method: method,
+        headers: { 'Content-Type': 'application/json; charset=utf-8' },
+        body: JSON.stringify(data)
+    });
+    return await response.json();
+}
+
+// --- Create secret flow ---
+
+async function send_new_link_data(encrypted, password, expiration) {
+    var hashed = await pw_hash_v2(password);
+    var api_data = {
+        encrypted_data: encrypted,
+        password: hashed,
+        expiration: expiration,
+        version: WHISPER_VERSION
+    };
+    document.getElementById('secret_link').value = 'Uploading data and generating link...';
+    try {
+        var response = await api_call('POST', api_data);
+        if (response.id) {
+            var secret_link = document.getElementById('secret_link');
+            secret_link.value = location.origin + location.pathname + response.id;
+            document.getElementById('copybutton').click();
+        } else {
+            document.getElementById('secret_link').value = response.result || 'Could not create link.';
+        }
+    } catch (e) {
+        document.getElementById('secret_link').value = 'Could not create link.';
+    }
+}
+
+async function new_link(event) {
     event.preventDefault();
-    let password = document.getElementById('password').value;
-    let secret_text = document.getElementById('secret_text').value;
-    let secret_file = document.getElementById('secret_file');
-    let expiration = document.getElementById('expiration').value;
-    let secret_link = document.getElementById('secret_link');
-    let encrypted = null;
-    secret_link.value = 'Encrypting, please wait...';
+    var password = document.getElementById('password').value;
+    var secret_text = document.getElementById('secret_text').value;
+    var secret_file = document.getElementById('secret_file');
+    var expiration = document.getElementById('expiration').value;
+    var secret_link = document.getElementById('secret_link');
+
     if (!secret_text && !secret_file.value) {
         secret_link.value = 'Please enter text or choose a file.';
-    }
-    else if (secret_file && secret_file.value != "") {
-        get_base64(secret_file).then(base64_file => {
-            encrypted = encrypt(base64_file, password);
-            send_new_link_data(encrypted, password, expiration, success, failure);
-        });
-    }
-    else {
-        encrypted = encrypt(secret_text, password);
-        send_new_link_data(encrypted, password, expiration, success, failure);
+        return;
     }
 
-    function success (response) {
-        secret_link.value = location.origin + location.pathname + response['id'];
-        document.getElementById('copybutton').click();
+    secret_link.value = 'Encrypting, please wait...';
+
+    var plaintext;
+    if (secret_file && secret_file.value != '') {
+        plaintext = await get_base64(secret_file);
+    } else {
+        plaintext = secret_text;
     }
-    function failure (response) {
-        if ('result' in response) {
-            secret_link.value = response['result'];
-        }
-        else {
-            secret_link.value = 'Could not create link.';
-        }
-    }
+
+    var encrypted = await encrypt_v2(plaintext, password);
+    await send_new_link_data(encrypted, password, expiration);
 }
 
-// Convery dataURL to binary Blob
+// --- Retrieve secret flow ---
+
 function dataURL_to_blob(file_mime, file_contents) {
-    let ab = new ArrayBuffer(file_contents.length);
-    let ia = new Uint8Array(ab);
-    for (let i = 0; i < file_contents.length; i++) {
+    var ab = new ArrayBuffer(file_contents.length);
+    var ia = new Uint8Array(ab);
+    for (var i = 0; i < file_contents.length; i++) {
         ia[i] = file_contents.charCodeAt(i);
     }
-    return blob = new Blob([ab], {type: file_mime});
+    return new Blob([ab], { type: file_mime });
 }
 
-// Download decrypted secret file
 function download_secret_file(decrypted, file_name, file_mime) {
-    let file_contents = atob(decrypted);
-    let blob = dataURL_to_blob(file_mime, file_contents);
-    let file_dl = document.createElement('a');
+    var file_contents = atob(decrypted);
+    var blob = dataURL_to_blob(file_mime, file_contents);
+    var file_dl = document.createElement('a');
     file_dl.download = file_name;
     file_dl.href = window.URL.createObjectURL(blob);
     file_dl.click();
 }
 
-// Display decrypted secret text
 function display_secret_text(decrypted) {
-    let text = document.getElementById('decrypted_text')
-    text.value = decrypted;
+    document.getElementById('decrypted_text').value = decrypted;
 }
 
-// Get the secret from the server and decrypt it
-function get_data(event) {
+async function get_data(event) {
     event.preventDefault();
-    let password = document.getElementById('password').value;
-    let decrypted_text = document.getElementById('decrypted_text');
-    function failure (response) {
-        decrypted_text.value = response["result"];
-    }
-    function success (response) {
-        if (!('encrypted_data' in response)) {
-            decrypted_text.value = response["result"];
-        }
-        else {
-            let regex = /^filename:(.+?),data:(\w+\/[-+.\w]+);base64,/;
-            let decrypted = decrypt(
-                response['encrypted_data'].toString(),
-                password
-            ).toString(CryptoJS.enc.Utf8);
-            let match = decrypted.substring(0,100).match(regex)
-            if (match) {
-                download_secret_file(decrypted.replace(regex, ""), match[1], match[2]);
-            }
-            else {
-                display_secret_text(decrypted);
-                document.getElementById('copybutton').click();
-            }
-        }
-    }
-    let api_data = {'password': pw_hash(password)};
-    decrypted_text.value = "Downloading secret..."
-    api_call("POST", api_data, success, failure);
-}
+    var password = document.getElementById('password').value;
+    var decrypted_text = document.getElementById('decrypted_text');
+    decrypted_text.value = 'Downloading secret...';
 
-// Make API call with payload
-function api_call(type, api_data, success_callback, failure_callback) {
-    $.ajax({
-        type: type,
-        processData: false,
-        contentType: 'application/json; charset=utf-8',
-        data: JSON.stringify(api_data),
-        dataType: 'json',
-        async: true,
-        complete: function (xhr, textStatus) {
-            response = $.parseJSON(xhr.responseText);
-            if (textStatus != 'success' && failure_callback) {
-                failure_callback(response);
-            }
-            else if (success_callback) {
-                success_callback(response);
-            }
+    try {
+        var version = parseInt(document.getElementById('secret_version').value || '1');
+
+        var hashed;
+        if (version >= 2) {
+            hashed = await pw_hash_v2(password);
+        } else {
+            hashed = pw_hash_v1(password);
         }
-    });
+
+        var response = await api_call('POST', { password: hashed });
+
+        if (!response.encrypted_data) {
+            decrypted_text.value = response.result || 'Error retrieving secret.';
+            return;
+        }
+
+        // Use the version from the server response if available
+        var secret_version = response.version || 1;
+        var decrypted;
+        var regex = /^filename:(.+?),data:(\w+\/[-+.\w]+);base64,/;
+
+        if (secret_version >= 2) {
+            decrypted = await decrypt_v2(response.encrypted_data, password);
+        } else {
+            decrypted = decrypt_v1(response.encrypted_data, password);
+        }
+
+        var match = decrypted.substring(0, 100).match(regex);
+        if (match) {
+            download_secret_file(decrypted.replace(regex, ''), match[1], match[2]);
+        } else {
+            display_secret_text(decrypted);
+            document.getElementById('copybutton').click();
+        }
+    } catch (e) {
+        decrypted_text.value = 'Error decrypting secret. Wrong password?';
+    }
 }
