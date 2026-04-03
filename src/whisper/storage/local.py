@@ -45,6 +45,20 @@ class local(store):
         os.remove(secret_filename)
         return True
 
+    def claim_secret(self, secret_id):
+        """Atomically claim a one-time secret using atomic rename."""
+        s = secret(secret_id)
+        if not s.check_id():
+            return False
+        secret_filename = os.path.join(self.config.path, f"{s.id}.json")
+        claimed_filename = secret_filename + ".claimed"
+        try:
+            os.rename(secret_filename, claimed_filename)
+            os.remove(claimed_filename)
+            return True
+        except FileNotFoundError:
+            return False
+
     def secret_from_file(self, secret_filename):
         if not os.path.exists(secret_filename):
             return False

@@ -4,10 +4,18 @@ import os
 import secrets
 import time
 
+import argon2
 import bcrypt
 import yaml
 
 logger = logging.getLogger("whisper")
+
+# Argon2id default parameters
+DEFAULT_ARGON2_TIME_COST = 5
+DEFAULT_ARGON2_MEMORY_COST = 131072  # 128 MB
+DEFAULT_ARGON2_PARALLELISM = 1
+DEFAULT_ARGON2_HASH_LEN = 32
+DEFAULT_ARGON2_SALT_LEN = 16
 
 
 class UniqueKeyLoader(yaml.SafeLoader):
@@ -95,10 +103,13 @@ def load_config(config_filenames=["config.yaml"]):
         "storage_class": None,
         "storage_config": {},
         "storage_clean_interval": 900,
-        "max_data_size_mb": 1,
+        "max_data_size_kb": 100,
         "app_listen_ip": "0.0.0.0",
         "app_port": "5000",
         "app_url_base": "/",
+        "argon2_time_cost": DEFAULT_ARGON2_TIME_COST,
+        "argon2_memory_cost": DEFAULT_ARGON2_MEMORY_COST,
+        "argon2_parallelism": DEFAULT_ARGON2_PARALLELISM,
     }
 
     # initialize config with default values
@@ -130,8 +141,26 @@ def class_loader(classname, *args, **kwargs):
     return myclass(*args, **kwargs)
 
 
+def create_argon2_hasher(time_cost=None, memory_cost=None, parallelism=None):
+    """Create an Argon2id password hasher with given or default parameters."""
+    return argon2.PasswordHasher(
+        time_cost=time_cost or DEFAULT_ARGON2_TIME_COST,
+        memory_cost=memory_cost or DEFAULT_ARGON2_MEMORY_COST,
+        parallelism=parallelism or DEFAULT_ARGON2_PARALLELISM,
+        hash_len=DEFAULT_ARGON2_HASH_LEN,
+        salt_len=DEFAULT_ARGON2_SALT_LEN,
+        type=argon2.Type.ID,
+    )
+
+# Default hasher, replaced by app.py after config is loaded
+_argon2_hasher = create_argon2_hasher()
+
+
 class secret:
     """Secret Class"""
+
+    REQUIRED_ATTRS = {"id", "create_date", "expire_date", "data", "hash"}
+    OPTIONAL_ATTRS = {"version", "failed_attempts"}
 
     def __init__(self, secret_id=None, expiration=None, key_pass=None, data=None):
         self.id = secret_id
@@ -139,15 +168,20 @@ class secret:
         self.expire_date = None
         self.data = None
         self.hash = None
+        self.version = 1
+        self.failed_attempts = 0
         if not self.id and expiration and key_pass and data:
             self.create(expiration, key_pass, data)
 
     def load_from_dict(self, secret_dict):
         """Load secret from a dict object"""
-        attr = ["id", "create_date", "expire_date", "data", "hash"]
-        # check if dict has appropriate attributes
-        if set(attr) != set(secret_dict):
-            logger.debug("Secret dict is missing some attributes.")
+        # check if dict has all required attributes
+        if not self.REQUIRED_ATTRS.issubset(set(secret_dict)):
+            logger.debug("Secret dict is missing required attributes.")
+            return False
+        # check for unknown attributes
+        if not set(secret_dict).issubset(self.REQUIRED_ATTRS | self.OPTIONAL_ATTRS):
+            logger.debug("Secret dict has unknown attributes.")
             return False
         # set attributes
         for key, value in secret_dict.items():
@@ -165,8 +199,9 @@ class secret:
         self.id = secrets.token_hex(20)
         return True
 
-    def create(self, expiration, key_pass, data):
+    def create(self, expiration, key_pass, data, version=2):
         """Create a new secret"""
+        self.version = version
         self.new_id()
         self.create_date = int(time.time())
         self.set_expire_date(expiration)
@@ -206,12 +241,23 @@ class secret:
         return key.encode("utf-8") + password.encode("utf-8")
 
     def check_password(self, key_pass):
-        """Check if a key_pass matches the stored salted SHA"""
+        """Check if a key_pass matches the stored hash (bcrypt for v1, argon2id for v2)"""
         if not self.hash:
             return False
-        return bcrypt.checkpw(key_pass, self.hash.encode("utf-8"))
+        if self.version >= 2:
+            try:
+                return _argon2_hasher.verify(self.hash, key_pass)
+            except argon2.exceptions.VerifyMismatchError:
+                return False
+            except argon2.exceptions.VerificationError:
+                return False
+        else:
+            return bcrypt.checkpw(key_pass, self.hash.encode("utf-8"))
 
-    def set_password(self, key_pass, salt_rounds=12):
-        """Generate salted hash and store it"""
-        salt = bcrypt.gensalt(rounds=salt_rounds)
-        self.hash = bcrypt.hashpw(key_pass, salt).decode("utf-8")
+    def set_password(self, key_pass):
+        """Generate hash and store it (bcrypt for v1, argon2id for v2)"""
+        if self.version >= 2:
+            self.hash = _argon2_hasher.hash(key_pass)
+        else:
+            salt = bcrypt.gensalt(rounds=12)
+            self.hash = bcrypt.hashpw(key_pass, salt).decode("utf-8")

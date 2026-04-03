@@ -2,11 +2,12 @@
 ### Options
 ###
 
-# Maximum file upload size
-max_data_size_mb: 1
+# Maximum upload size in KB
+max_data_size_kb: 100
 
-# Server level secret key used for additional security when encrypting secrets
-secret_key: 'w7bAyd&zpc#jPUc2Y6K%gbRtuF@M9Y^@'
+# Server level secret key used for additional security when encrypting secrets.
+# IMPORTANT: Change this to a unique random string of 32+ characters!
+secret_key: 'CHANGE_ME_TO_A_RANDOM_STRING_OF_32_OR_MORE_CHARACTERS'
 
 # Interval in seconds that the secret storage cleaner will run
 storage_clean_interval: 900
@@ -21,6 +22,13 @@ app_port: 5000
 
 # Base URL path for app, defaults to root
 app_url_base: /
+
+# Argon2id password hashing parameters (v2 secrets)
+# Higher values = more secure but slower. Must match on client and server.
+# OWASP minimum: time=3, memory=65536 (64MB), parallelism=1
+argon2_time_cost: 5
+argon2_memory_cost: 131072
+argon2_parallelism: 1
 
 ###
 ### Storage Backend

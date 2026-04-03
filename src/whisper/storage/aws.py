@@ -37,6 +37,20 @@ class s3(store):
         self.delete_s3_obj(f"{secret_id}.json")
         return True
 
+    def claim_secret(self, secret_id):
+        """Atomically claim a one-time secret by deleting first."""
+        full_path = os.path.join(self.config.bucket_path, f"{secret_id}.json")
+        try:
+            self.client.head_object(
+                Bucket=self.config.bucket_name, Key=full_path
+            )
+            self.client.delete_object(
+                Bucket=self.config.bucket_name, Key=full_path
+            )
+            return True
+        except self.client.exceptions.ClientError:
+            return False
+
     def delete_expired(self):
         store_objs = self.client.list_objects_v2(
             Bucket=self.config.bucket_name, Prefix=self.config.bucket_path

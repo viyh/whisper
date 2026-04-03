@@ -47,6 +47,18 @@ class gcs(store):
         self.delete_gcs_obj(f"{secret_id}.json")
         return True
 
+    def claim_secret(self, secret_id):
+        """Atomically claim a one-time secret by deleting with generation match."""
+        full_path = os.path.join(self.config.bucket_path, f"{secret_id}.json")
+        try:
+            blob = self.bucket.get_blob(full_path)
+            if not blob:
+                return False
+            blob.delete(if_generation_match=blob.generation)
+            return True
+        except (NotFound, Exception):
+            return False
+
     def delete_expired(self):
         try:
             store_objs = list(
