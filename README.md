@@ -283,7 +283,7 @@ docker buildx build --platform=linux/amd64,linux/arm64 \
 
 ### Tech Stack
 
-**Backend**: Python 3.12, Flask 3.1, Gunicorn 23, Nginx (Debian Slim)
+**Backend**: Python 3.13, Flask 3.1, Gunicorn 23, Nginx (Debian Slim)
 
 **Client-side crypto**: Web Crypto API (AES-256-GCM, PBKDF2), argon2-browser (WASM)
 
