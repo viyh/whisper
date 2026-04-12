@@ -10,8 +10,8 @@ logger = logging.getLogger(__name__)
 
 
 class local(store):
-    def __init__(self, name="local", parent=None, path="/tmp/whisper"):
-        self.default_config = {"path": "/tmp/whisper"}
+    def __init__(self, name="local", parent=None, path="/tmp/whisper"):  # nosec B108
+        self.default_config = {"path": "/tmp/whisper"}  # nosec B108
         super().__init__(name, parent)
 
     def start(self):

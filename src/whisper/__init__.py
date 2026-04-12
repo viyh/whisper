@@ -5,7 +5,6 @@ import secrets
 import time
 
 import argon2
-import bcrypt
 import yaml
 
 logger = logging.getLogger("whisper")
@@ -60,8 +59,8 @@ class ConfigError(Exception):
 
     def __init__(self, config_key="", message="Configuration error"):
         self.message = message
-        super().__init__(self.message)
         self.config_key = config_key
+        super().__init__(self.message)
 
     def __str__(self):
         return f"{self.message}: {self.config_key}"
@@ -71,14 +70,14 @@ class ConfigMissingError(ConfigError):
     """Configuration Missing Parameter Error Exception"""
 
     def __init__(self, config_key="", message="Missing configuration parameter"):
-        super().__init__(self.message)
+        super().__init__(config_key=config_key, message=message)
 
 
-class ConfigUnknownError(Exception):
+class ConfigUnknownError(ConfigError):
     """Configuration Unknown Parameter Error Exception"""
 
     def __init__(self, config_key="", message="Unknown configuration parameter"):
-        super().__init__(self.message)
+        super().__init__(config_key=config_key, message=message)
 
 
 def check_config(config_dict, default_config_dict):
@@ -99,7 +98,7 @@ def check_config(config_dict, default_config_dict):
 def load_config(config_filenames=["config.yaml"]):
     """Load configuration file and set default values"""
     default_config = {
-        "secret_key": None,
+        "secret_key": None,  # nosec B105
         "storage_class": None,
         "storage_config": {},
         "storage_clean_interval": 900,
@@ -112,8 +111,9 @@ def load_config(config_filenames=["config.yaml"]):
         "argon2_parallelism": DEFAULT_ARGON2_PARALLELISM,
     }
 
-    # initialize config with default values
-    config = default_config
+    # initialize config with default values (copy — we mutate this below and
+    # don't want to pollute default_config, which check_config compares against)
+    config = dict(default_config)
     for config_filename in config_filenames:
         if not os.path.exists(config_filename):
             logger.error(f"Config file does not exist, skipping. {config_filename}")
@@ -121,7 +121,7 @@ def load_config(config_filenames=["config.yaml"]):
         with open(config_filename, "r") as config_file:
             try:
                 # load YAML config file
-                config.update(yaml.load(config_file, Loader=UniqueKeyLoader))
+                config.update(yaml.load(config_file, Loader=UniqueKeyLoader))  # nosec B506
             except ValueError as e:
                 # error on duplicate keys
                 raise ConfigError(
@@ -156,6 +156,13 @@ def create_argon2_hasher(time_cost=None, memory_cost=None, parallelism=None):
 _argon2_hasher = create_argon2_hasher()
 
 
+#: Current stored-secret format version. New secrets are always written with
+#: this version. The field is retained in the on-disk format and in the API
+#: envelope so a future v3 can ship without breaking already-stored v2 data;
+#: today, any version other than this is rejected.
+CURRENT_SECRET_VERSION = 2
+
+
 class secret:
     """Secret Class"""
 
@@ -168,7 +175,7 @@ class secret:
         self.expire_date = None
         self.data = None
         self.hash = None
-        self.version = 1
+        self.version = CURRENT_SECRET_VERSION
         self.failed_attempts = 0
         if not self.id and expiration and key_pass and data:
             self.create(expiration, key_pass, data)
@@ -199,9 +206,9 @@ class secret:
         self.id = secrets.token_hex(20)
         return True
 
-    def create(self, expiration, key_pass, data, version=2):
+    def create(self, expiration, key_pass, data):
         """Create a new secret"""
-        self.version = version
+        self.version = CURRENT_SECRET_VERSION
         self.new_id()
         self.create_date = int(time.time())
         self.set_expire_date(expiration)
@@ -241,23 +248,16 @@ class secret:
         return key.encode("utf-8") + password.encode("utf-8")
 
     def check_password(self, key_pass):
-        """Check if a key_pass matches the stored hash (bcrypt for v1, argon2id for v2)"""
+        """Check if a key_pass matches the stored Argon2id hash."""
         if not self.hash:
             return False
-        if self.version >= 2:
-            try:
-                return _argon2_hasher.verify(self.hash, key_pass)
-            except argon2.exceptions.VerifyMismatchError:
-                return False
-            except argon2.exceptions.VerificationError:
-                return False
-        else:
-            return bcrypt.checkpw(key_pass, self.hash.encode("utf-8"))
+        try:
+            return _argon2_hasher.verify(self.hash, key_pass)
+        except argon2.exceptions.VerifyMismatchError:
+            return False
+        except argon2.exceptions.VerificationError:
+            return False
 
     def set_password(self, key_pass):
-        """Generate hash and store it (bcrypt for v1, argon2id for v2)"""
-        if self.version >= 2:
-            self.hash = _argon2_hasher.hash(key_pass)
-        else:
-            salt = bcrypt.gensalt(rounds=12)
-            self.hash = bcrypt.hashpw(key_pass, salt).decode("utf-8")
+        """Generate Argon2id hash and store it."""
+        self.hash = _argon2_hasher.hash(key_pass)

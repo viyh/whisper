@@ -15,7 +15,12 @@ from flask_limiter.util import get_remote_address
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 import whisper as whisper_module
-from whisper import create_argon2_hasher, load_config, secret
+from whisper import (
+    CURRENT_SECRET_VERSION,
+    create_argon2_hasher,
+    load_config,
+    secret,
+)
 from whisper.storage import store
 
 __version__ = "0.2.0"
@@ -101,10 +106,11 @@ def create_secret():
     # This has to be here in order for Flask to check against MAX_CONTENT_LENGTH
     # See: https://github.com/pallets/flask/issues/2690
     request.data
-    # determine version (default to 2 for new secrets)
-    version = data.get("version", 2)
-    if version not in (1, 2):
-        version = 2
+    # strict version check — reject anything other than the currently supported
+    # format rather than silently coercing.
+    version = data.get("version", CURRENT_SECRET_VERSION)
+    if version != CURRENT_SECRET_VERSION:
+        return jsonify({"result": "Unsupported version"}), 400
 
     # create secret object
     s = secret()
@@ -112,7 +118,6 @@ def create_secret():
         expiration=expiration,
         key_pass=s.get_key_pass(password, config.secret_key),
         data=encrypted_data,
-        version=version,
     )
     app.logger.info(f"[{request.remote_addr}] Secret create: {s.id}")
     # store the secret
@@ -131,7 +136,6 @@ def get_secret(secret_id):
         return render_template(
             "show.html",
             version=__version__,
-            secret_version=getattr(s, "version", 1),
             argon2_time_cost=config.argon2_time_cost,
             argon2_memory_cost=config.argon2_memory_cost,
             argon2_parallelism=config.argon2_parallelism,
@@ -181,7 +185,12 @@ def show_secret(secret_id):
 
     # return the secret
     app.logger.info(f"[{request.remote_addr}] Secret retrieved: {s.id}")
-    return jsonify({"encrypted_data": s.data, "version": getattr(s, "version", 1)})
+    return jsonify(
+        {
+            "encrypted_data": s.data,
+            "version": getattr(s, "version", CURRENT_SECRET_VERSION),
+        }
+    )
 
 
 @app.errorhandler(404)
@@ -220,9 +229,10 @@ store.start()
 app.config["MAX_CONTENT_LENGTH"] = int(config.max_data_size_kb * 1000 * 2)
 
 if __name__ == "__main__":
-    # run the app
+    # Dev-only entry point. Production runs under gunicorn and never reaches this block.
+    # Flask's interactive debugger is intentionally NOT coupled to LOG_LEVEL — set
+    # FLASK_DEBUG=1 explicitly if you want the Werkzeug debugger during local dev.
     app.run(
         host=config.app_listen_ip,
         port=config.app_port,
-        debug=os.environ.get("LOG_LEVEL", False) == "DEBUG",
     )

@@ -1,6 +1,7 @@
 // Whisper - Secure secret sharing
-// Version 2: Argon2id + AES-256-GCM via Web Crypto API
-// Backward compatible with v1 (PBKDF2 + CryptoJS AES-CBC)
+// Argon2id password hashing + AES-256-GCM via Web Crypto API.
+// Stored-secret format is version-tagged so a future v3 can ship without
+// breaking already-stored v2 data; currently only version 2 is supported.
 
 const WHISPER_VERSION = 2;
 
@@ -67,14 +68,16 @@ function toggle_password_visibility() {
     var pw = document.getElementById('password');
     var eyeIcon = document.getElementById('eye-icon');
     var eyeSlashIcon = document.getElementById('eye-slash-icon');
+    // Toggle via the `hidden` attribute rather than inline style writes so
+    // the page stays compatible with a strict `style-src` CSP.
     if (pw.type === 'password') {
         pw.type = 'text';
-        eyeIcon.style.display = 'none';
-        eyeSlashIcon.style.display = 'inline';
+        eyeIcon.hidden = true;
+        eyeSlashIcon.hidden = false;
     } else {
         pw.type = 'password';
-        eyeIcon.style.display = 'inline';
-        eyeSlashIcon.style.display = 'none';
+        eyeIcon.hidden = false;
+        eyeSlashIcon.hidden = true;
     }
 }
 
@@ -145,7 +148,7 @@ async function derive_key_v2(password) {
         {
             name: 'PBKDF2',
             salt: encoder.encode(window.location.origin),
-            iterations: 210000,
+            iterations: 600000,
             hash: 'SHA-256'
         },
         keyMaterial,
@@ -200,24 +203,6 @@ async function decrypt_v2(ciphertext_b64, password) {
         ciphertext
     );
     return new TextDecoder().decode(plaintext);
-}
-
-// --- V1 Crypto: PBKDF2 + CryptoJS AES-CBC (backward compat) ---
-
-function pw_hash_v1(password) {
-    var salt = btoa(location.origin.repeat(4));
-    return CryptoJS.PBKDF2(password, salt, {
-        keySize: 512 / 32,
-        iterations: 30001
-    }).toString(CryptoJS.enc.Base64);
-}
-
-function encrypt_v1(plaintext, password) {
-    return CryptoJS.AES.encrypt(plaintext, password).toString();
-}
-
-function decrypt_v1(ciphertext, password) {
-    return CryptoJS.AES.decrypt(ciphertext, password).toString(CryptoJS.enc.Utf8);
 }
 
 // --- API call (vanilla fetch) ---
@@ -313,15 +298,7 @@ async function get_data(event) {
     decrypted_text.value = 'Downloading secret...';
 
     try {
-        var version = parseInt(document.getElementById('secret_version').value || '1');
-
-        var hashed;
-        if (version >= 2) {
-            hashed = await pw_hash_v2(password);
-        } else {
-            hashed = pw_hash_v1(password);
-        }
-
+        var hashed = await pw_hash_v2(password);
         var response = await api_call('POST', { password: hashed });
 
         if (!response.encrypted_data) {
@@ -329,17 +306,20 @@ async function get_data(event) {
             return;
         }
 
-        // Use the version from the server response if available
-        var secret_version = response.version || 1;
-        var decrypted;
-        var regex = /^filename:(.+?),data:(\w+\/[-+.\w]+);base64,/;
-
-        if (secret_version >= 2) {
-            decrypted = await decrypt_v2(response.encrypted_data, password);
-        } else {
-            decrypted = decrypt_v1(response.encrypted_data, password);
+        // Only version 2 is supported. Anything else indicates data written by
+        // an incompatible build (e.g. a pre-0.2.0 v1 secret being read by a
+        // post-v1-removal client). Surface an error rather than silently
+        // falling through.
+        if ((response.version || 0) !== WHISPER_VERSION) {
+            decrypted_text.value = 'Unsupported secret format (version ' +
+                response.version + '). Use the release/0.1.0_to_0.2.0 branch ' +
+                'to decrypt legacy v1 secrets.';
+            return;
         }
 
+        var decrypted = await decrypt_v2(response.encrypted_data, password);
+
+        var regex = /^filename:(.+?),data:(\w+\/[-+.\w]+);base64,/;
         var match = decrypted.substring(0, 100).match(regex);
         if (match) {
             download_secret_file(decrypted.replace(regex, ''), match[1], match[2]);
