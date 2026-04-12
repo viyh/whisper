@@ -58,18 +58,17 @@ See [Security Details](#security-details) for the full cryptographic design.
 ## Quick Start
 
 ```bash
-# Generate a config file
-cp src/config.default.yaml config.yaml
+# Generate a config file with a random secret key
+export SECRET_KEY=$(head /dev/urandom | LC_ALL=C tr -dc 'A-Za-z0-9' | head -c 48)
+sed "s/CHANGE_ME_TO_A_RANDOM_STRING_OF_32_OR_MORE_CHARACTERS/$SECRET_KEY/" src/config.default.yaml > config.yaml
 
-# Set a strong secret key
-SECRET_KEY=$(head /dev/urandom | LC_ALL=C tr -dc 'A-Za-z0-9' | head -c 48)
-# Edit config.yaml and set secret_key to the value above
+# Build from source (optional, can also pull viyh/whisper:0.2.0):
+# docker build -t viyh/whisper .
 
-# Build and run
-docker build -t whisper .
+# Run
 docker run -d --name whisper -p 8000:8000 \
     -v $(pwd)/config.yaml:/usr/src/app/config.yaml \
-    whisper
+    viyh/whisper:0.2.0
 ```
 
 Browse to http://localhost:8000
