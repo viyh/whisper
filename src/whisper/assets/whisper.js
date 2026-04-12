@@ -21,7 +21,12 @@ function get_argon2_params() {
 // --- Clipboard ---
 
 function init_clipboard() {
-    var clipboard = new ClipboardJS('.clipbtn');
+    var clipboard = new ClipboardJS('.clipbtn', {
+        text: function(trigger) {
+            var target = document.querySelector(trigger.dataset.clipboardTarget);
+            return target ? target.value : '';
+        }
+    });
     clipboard.on('success', function(e) {
         var btn = e.trigger;
         setTooltip(btn, 'Copied');
