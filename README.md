@@ -236,9 +236,13 @@ Or use built-in roles: `roles/storage.legacyObjectOwner` + `roles/storage.legacy
 
 The server **never** has access to the plaintext password or data.
 
-### Backward Compatibility
+### Legacy v1 Secrets
 
-Version 1 secrets (PBKDF2 + bcrypt + CryptoJS AES-CBC) are still supported for retrieval. The `version` field determines which crypto path to use. Old secrets expire naturally.
+If you have a pre-0.2.0 secret link that was created with the v1 format (PBKDF2 + bcrypt + CryptoJS AES-CBC), check out the [`release/0.1.0_to_0.2.0`](../../tree/release/0.1.0_to_0.2.0) branch, which retains v1 decryption support.
+
+### Rate Limiting
+
+The default in-memory rate limiter (`storage_uri="memory://"`) tracks state per-gunicorn-worker. In multi-worker or multi-container deployments, each worker enforces limits independently. For shared rate-limit state across workers, configure a Redis backend via [flask-limiter](https://flask-limiter.readthedocs.io/).
 
 ## Development
 
@@ -290,7 +294,8 @@ docker buildx build --platform=linux/amd64,linux/arm64 \
 
 ## Contributing
 
-Pull requests are welcome on GitHub.
+Pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup
+and guidelines. For security issues, see [SECURITY.md](SECURITY.md).
 
 ## Author
 
