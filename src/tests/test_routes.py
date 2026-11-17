@@ -148,3 +148,35 @@ def test_oversize_request_returns_413(client, app_module):
         },
     )
     assert r.status_code == 413
+
+
+def _expire_now(app_module, secret_id):
+    """Backdate a stored secret so it is expired but not yet cleaned up."""
+    stored = app_module.store.backend.secrets[secret_id]
+    stored.create_date -= 7200
+    stored.expire_date -= 7200
+
+
+def test_expired_secret_cannot_be_retrieved_before_cleanup(client, app_module):
+    sid = _create(client, expiration="1 hour").get_json()["id"]
+    _expire_now(app_module, sid)
+    r = client.post(f"/{sid}", json={"password": GOOD_PW})
+    assert r.get_json() == {"result": "Invalid ID"}
+
+
+def test_expired_secret_page_redirects(client, app_module):
+    sid = _create(client, expiration="1 hour").get_json()["id"]
+    _expire_now(app_module, sid)
+    r = client.get(f"/{sid}")
+    assert r.status_code == 302
+
+
+def test_failed_attempt_does_not_resurrect_claimed_secret(client, app_module):
+    """A wrong-password request that loaded the secret before a concurrent
+    successful claim must not write it back into storage."""
+    sid = _create(client).get_json()["id"]
+    loaded = app_module.store.get_secret(sid)  # wrong-password request reads...
+    assert app_module.store.claim_secret(sid) is True  # ...recipient claims...
+    loaded.failed_attempts += 1
+    assert app_module.store.update_secret(loaded) is False  # ...write-back is a no-op
+    assert app_module.store.get_secret(sid) is False

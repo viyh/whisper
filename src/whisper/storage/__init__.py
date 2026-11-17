@@ -24,7 +24,12 @@ class store_cleaner:
         """Run the cleaner loop, sleep for clean_interval between runs"""
         while True:
             logger.info("Cleaner - Deleting expired secrets")
-            self.store.delete_expired()
+            try:
+                self.store.delete_expired()
+            except Exception:
+                # Never let a transient backend error kill the cleaner thread;
+                # log it and try again on the next interval.
+                logger.exception("Cleaner - Error deleting expired secrets")
             logger.info(f"Cleaner - Sleeping for {self.store.clean_interval} seconds")
             time.sleep(self.store.clean_interval)
 
@@ -32,10 +37,10 @@ class store_cleaner:
 class store:
     """Storage base class, stores secrets in a backend"""
 
-    def __init__(self, storage_class, storage_config={}, clean_interval=900):
+    def __init__(self, storage_class, storage_config=None, clean_interval=900):
         self.clean_interval = clean_interval
         self.storage_class = storage_class
-        self.storage_config = storage_config
+        self.storage_config = storage_config if storage_config is not None else {}
 
     def start(self):
         """Import/create configured backend storage object, check the
@@ -53,16 +58,25 @@ class store:
         self.cleaner = store_cleaner(self)
 
     def get_secret(self, secret_id):
-        """Retrieve a secret from the storage backend"""
+        """Retrieve a secret from the storage backend. Expired secrets are
+        treated as missing, so they can't be read before the cleaner runs."""
         s = self.backend.get_secret(secret_id)
-        if isinstance(s, secret) and s.check_id():
-            return s
-        else:
+        if not isinstance(s, secret) or not s.check_id():
             return False
+        if s.is_expired():
+            logger.info(f"Secret expired: {s.id}")
+            return False
+        return s
 
     def set_secret(self, secret):
         """Save a secret to the storage backend"""
         return self.backend.set_secret(secret)
+
+    def update_secret(self, secret):
+        """Save changes to a secret that already exists in the backend.
+        Never recreates a secret that was deleted or claimed in the meantime.
+        Returns True if the update was written, False otherwise."""
+        return self.backend.update_secret(secret)
 
     def delete_secret(self, secret_id):
         """Delete a secret from the storage backend"""
