@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-11-17
+
+### Security
+* Rate limiting behind a load balancer was effectively global. nginx inside the container appends the address of whatever connected to it, so behind an ALB or other proxy every client appeared to come from the proxy's IP and shared one 10/min limit, letting a single client block secret retrieval for everyone. New `trusted_proxy_count` setting (default `0`, the previous behavior) tells Whisper how many extra `X-Forwarded-For` entries upstream proxies add, so the real client IP is used for rate limiting and logs.
+
+### Added
+* `trusted_proxy_count` config option, validated as a non-negative integer at startup.
+* README "Running Behind a Proxy" section with recommended values per deployment.
+* Tests for client IP resolution and spoofing resistance (83 tests).
+
+### Changed
+* README: document the 30-day retention for unread one-time secrets, add `update_secret` to the storage backend method table, and correct the client-side PBKDF2 iteration count (600,000).
+
 ## [0.2.1] - 2026-11-17
 
 ### Security
