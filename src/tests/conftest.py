@@ -50,7 +50,8 @@ def app_module(test_config_path):
     built exactly once across the run.
     """
     os.environ["CONFIG_FILE"] = test_config_path
-    import app as app_module  # noqa: E402  (import after env setup is deliberate)
+    # import after env setup is deliberate
+    import app as app_module
 
     # Disable rate limiting for tests. The per-secret failed-attempt lockout
     # in show_secret is still exercised — we just don't want to trip

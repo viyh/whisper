@@ -36,7 +36,8 @@ def test_set_then_get_roundtrip(backend):
     s = _make_secret()
     assert backend.set_secret(s) is True
     retrieved = backend.get_secret(s.id)
-    assert retrieved is s
+    assert retrieved is not s  # backend returns a copy, not live state
+    assert retrieved.__dict__ == s.__dict__
     assert retrieved.data == "ciphertext"
 
 
@@ -83,7 +84,7 @@ def test_delete_expired_removes_expired_entries(backend):
 
     backend.delete_expired()
 
-    assert backend.get_secret(fresh.id) is fresh
+    assert backend.get_secret(fresh.id).id == fresh.id
     assert backend.get_secret(stale.id) is False
 
 
@@ -93,8 +94,9 @@ def test_delete_expired_leaves_one_time_within_grace_window(backend):
     ot = _make_secret("One time use")
     backend.set_secret(ot)
     backend.delete_expired()
-    assert backend.get_secret(ot.id) is ot
+    assert backend.get_secret(ot.id).id == ot.id
 
     ot.create_date = int(time.time()) - 86400 * 31
+    backend.set_secret(ot)  # backend stores copies, so persist the change
     backend.delete_expired()
     assert backend.get_secret(ot.id) is False

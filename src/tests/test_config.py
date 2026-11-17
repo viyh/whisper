@@ -9,7 +9,6 @@ from whisper import (
     load_config,
 )
 
-
 VALID_CONFIG = """\
 secret_key: "abcdefghijklmnopqrstuvwxyz_0123456"
 storage_class: whisper.storage.memory.memory

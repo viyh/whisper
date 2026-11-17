@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-11-17
+
+### Security
+* eMudhra CA compromise - Pin `certifi==2026.10.23` (fixed in >= 2026.10.19, GHSA-6q48-6c7w-9gw2) so the Python HTTP clients (requests, boto3, google-cloud-storage) no longer trust the affected roots. The Debian base image already ships the fixed `ca-certificates` (20250419+deb13u1).
+* Expired secrets were retrievable until the next cleaner run. Expiry is now checked on every read.
+* The storage cleaner thread exited permanently on any backend error, so expired secrets were never purged afterwards. Errors are now logged and the cleaner keeps running.
+* S3 one-time secrets could be retrieved by multiple concurrent requests, because S3 deletes are idempotent. Claims now use a conditional delete on the object's ETag.
+* A wrong-password request racing a successful retrieval could write a just-claimed one-time secret back into storage. Failed-attempt counts now use a new `update_secret` operation that never recreates a deleted secret (conditional writes on S3/GCS, no-create open on local disk).
+* Local-disk secret files are now created with owner-only (0600) permissions.
+* The memory backend no longer logs password hashes and encrypted data at DEBUG level.
+* Docker image runs `apt-get upgrade` at build time to pick up pending Debian security updates, and `build.sh` always pulls the latest base image.
+
+### Changed
+* Upgrade to Python 3.14 (python:3.14-slim, Debian trixie). CI updated to match.
+* Upgrade Python dependencies to latest, including Flask-Limiter 4, Gunicorn 27, protobuf 7, boto3 1.44, google-cloud-storage 3.17, requests 2.34, urllib3 2.8.
+* Upgrade dev tooling: pytest 9, pytest-cov 7, ruff 0.17, bandit 1.9, pip-audit 2.10. CI audit job uses the pinned pip-audit.
+* Rewrote the GCS and S3 storage backends with a shared structure. Dates are uploaded with the object in one request (GCS), listings are paginated (S3 previously stopped at 1000 objects), only `<bucket_path>/<id>.json` objects are touched, and objects missing date metadata fall back to the stored secret instead of never expiring.
+* `build.sh` tags `0.2.1`, `0.2.1.<timestamp>`, and `latest`.
+
+### Fixed
+* GCS cleaner crashed on connection errors (referenced an undefined variable and a non-existent `_connect` method).
+* Lint cleanups for ruff 0.17 (mutable defaults, blind exceptions, legacy `super()` calls).
+
+### Added
+* Tests for the local, S3 (botocore Stubber), and GCS (mocked) backends, the cleaner, and expiry/claim races (72 tests).
+
 ## [0.2.0] - 2026-04-11
 
 ### Security

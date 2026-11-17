@@ -62,13 +62,13 @@ See [Security Details](#security-details) for the full cryptographic design.
 export SECRET_KEY=$(head /dev/urandom | LC_ALL=C tr -dc 'A-Za-z0-9' | head -c 48)
 sed "s/CHANGE_ME_TO_A_RANDOM_STRING_OF_32_OR_MORE_CHARACTERS/$SECRET_KEY/" src/config.default.yaml > config.yaml
 
-# Build from source (optional, can also pull viyh/whisper:0.2.0):
+# Build from source (optional, can also pull viyh/whisper:0.2.1):
 # docker build -t viyh/whisper .
 
 # Run
 docker run -d --name whisper -p 8000:8000 \
     -v $(pwd)/config.yaml:/usr/src/app/config.yaml \
-    viyh/whisper:0.2.0
+    viyh/whisper:0.2.1
 ```
 
 Browse to http://localhost:8000
@@ -274,16 +274,16 @@ docker run -it --rm --name whisper -p 8000:8000 \
 
 ```bash
 # Standard build
-docker build -t whisper:0.2.0 .
+docker build -t whisper:0.2.1 .
 
 # Cross-platform build
 docker buildx build --platform=linux/amd64,linux/arm64 \
-    -t whisper:0.2.0 .
+    -t whisper:0.2.1 .
 ```
 
 ### Tech Stack
 
-**Backend**: Python 3.13, Flask 3.1, Gunicorn 23, Nginx (Debian Slim)
+**Backend**: Python 3.14, Flask 3.1, Gunicorn 27, Nginx (Debian Slim)
 
 **Client-side crypto**: Web Crypto API (AES-256-GCM, PBKDF2), argon2-browser (WASM)
 

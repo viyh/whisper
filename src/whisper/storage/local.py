@@ -31,9 +31,26 @@ class local(store):
         if not s.check_id():
             return False
         secret_filename = os.path.join(self.config.path, f"{s.id}.json")
-        with open(secret_filename, "w") as secret_file:
+        # owner-only permissions; secret files are never meant to be shared
+        fd = os.open(secret_filename, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as secret_file:
             json.dump(s.__dict__, secret_file)
         logger.debug(f"Saving secret: {secret_filename}")
+        return True
+
+    def update_secret(self, s):
+        """Rewrite an existing secret file. Opening without O_CREAT fails if the
+        file was claimed/deleted, so a claimed secret is never recreated."""
+        if not s.check_id():
+            return False
+        secret_filename = os.path.join(self.config.path, f"{s.id}.json")
+        try:
+            fd = os.open(secret_filename, os.O_WRONLY | os.O_TRUNC)
+        except FileNotFoundError:
+            return False
+        with os.fdopen(fd, "w") as secret_file:
+            json.dump(s.__dict__, secret_file)
+        logger.debug(f"Updating secret: {secret_filename}")
         return True
 
     def delete_secret(self, secret_id):
@@ -66,9 +83,8 @@ class local(store):
         try:
             with open(secret_filename) as secret_file:
                 s.load_from_dict(json.load(secret_file))
-        except Exception as e:
+        except (OSError, ValueError) as e:
             logger.error(f"Could not load secret file [{secret_filename}]: {e}")
-            pass
         if not s.check_id():
             return False
         return s
