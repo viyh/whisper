@@ -12,21 +12,20 @@ from flask import (
 )
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-from werkzeug.middleware.proxy_fix import ProxyFix
 
 import whisper as whisper_module
 from whisper import (
     CURRENT_SECRET_VERSION,
+    apply_proxy_fix,
     create_argon2_hasher,
     load_config,
     secret,
 )
 from whisper.storage import store
 
-__version__ = "0.2.1"
+__version__ = "0.2.2"
 
 app = Flask("whisper")
-app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=0)
 
 if __name__ != "__main__":
     gunicorn_logger = logging.getLogger("gunicorn.error")
@@ -36,6 +35,9 @@ if __name__ != "__main__":
 # load configuration file
 config_filename = os.environ.get("CONFIG_FILE", "config.yaml")
 config = load_config(config_filenames=[config_filename])
+
+# trust X-Forwarded-For from nginx plus any configured upstream proxies
+app.wsgi_app = apply_proxy_fix(app.wsgi_app, config.trusted_proxy_count)
 
 # warn if secret_key looks like a default/placeholder
 if "CHANGE_ME" in config.secret_key or len(config.secret_key) < 32:

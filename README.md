@@ -49,8 +49,8 @@ Whisper uses a layered security approach:
 
 - **Client-side encryption**: Secrets are encrypted with AES-256-GCM (Web Crypto API) before leaving the browser. The server never has access to plaintext data.
 - **Argon2id password hashing**: Passwords are hashed client-side using Argon2id (WASM) before transmission. The server re-hashes with its own Argon2id salt, so even a compromised server cannot recover passwords.
-- **One-time secrets**: Deleted atomically after retrieval -- concurrent requests cannot both succeed.
-- **Rate limiting**: 10 attempts per minute per IP, plus per-secret lockout after 10 failed password attempts.
+- **One-time secrets**: Deleted atomically after retrieval -- concurrent requests cannot both succeed. Unread one-time secrets are deleted after 30 days.
+- **Rate limiting**: 10 attempts per minute per IP, plus per-secret lockout after 10 failed password attempts. Behind a load balancer, set `trusted_proxy_count` (see [Running Behind a Proxy](#running-behind-a-proxy)).
 - **Strict CSP**: No inline scripts. Content-Security-Policy with explicit allowlists.
 
 See [Security Details](#security-details) for the full cryptographic design.
@@ -62,13 +62,13 @@ See [Security Details](#security-details) for the full cryptographic design.
 export SECRET_KEY=$(head /dev/urandom | LC_ALL=C tr -dc 'A-Za-z0-9' | head -c 48)
 sed "s/CHANGE_ME_TO_A_RANDOM_STRING_OF_32_OR_MORE_CHARACTERS/$SECRET_KEY/" src/config.default.yaml > config.yaml
 
-# Build from source (optional, can also pull viyh/whisper:0.2.1):
+# Build from source (optional, can also pull viyh/whisper:0.2.2):
 # docker build -t viyh/whisper .
 
 # Run
 docker run -d --name whisper -p 8000:8000 \
     -v $(pwd)/config.yaml:/usr/src/app/config.yaml \
-    viyh/whisper:0.2.1
+    viyh/whisper:0.2.2
 ```
 
 Browse to http://localhost:8000
@@ -97,6 +97,7 @@ Copy `src/config.default.yaml` to `config.yaml` and customize. Mount it into the
 | `argon2_time_cost` | `5` | Argon2id time cost parameter. Higher = slower + more secure. |
 | `argon2_memory_cost` | `131072` | Argon2id memory cost in KB (131072 = 128 MB). |
 | `argon2_parallelism` | `1` | Argon2id parallelism parameter. |
+| `trusted_proxy_count` | `0` | Number of `X-Forwarded-For` entries added by proxies in front of the container. See [Running Behind a Proxy](#running-behind-a-proxy). |
 
 ### Environment Variables
 
@@ -105,6 +106,18 @@ Copy `src/config.default.yaml` to `config.yaml` and customize. Mount it into the
 | `WEB_PORT` | `8000` | External nginx listen port. |
 | `LOG_LEVEL` | `INFO` | Set to `DEBUG` for verbose logging. |
 | `CONFIG_FILE` | `config.yaml` | Config file path inside the container. |
+
+### Running Behind a Proxy
+
+Whisper rate-limits and logs by client IP. nginx inside the container is always trusted, but any load balancer or CDN in front of the container adds its own `X-Forwarded-For` entries, and Whisper needs to know how many to skip to find the real client. If this is too low, every visitor appears to come from the proxy and shares a single rate limit, so one client can block retrievals for everyone. If it is too high, clients can spoof their IP and dodge the limit.
+
+| Deployment | `trusted_proxy_count` |
+|------------|-----------------------|
+| Clients connect directly to the container | `0` |
+| One proxy that appends the client IP (e.g. AWS ALB, a reverse proxy) | `1` |
+| Proxy that appends the client IP and its own IP (e.g. Google Cloud external Application Load Balancer) | `2` |
+
+Proxy behavior varies, so verify after deploying: each request is logged as `[<ip>] ...`, and that IP should be your own public address, not a private or load balancer address.
 
 ## Storage Backends
 
@@ -222,7 +235,7 @@ Or use built-in roles: `roles/storage.legacyObjectOwner` + `roles/storage.legacy
 **Creating a secret:**
 1. User enters plaintext + password.
 2. Client hashes password with **Argon2id** (configurable params, public salt from URL origin).
-3. Client encrypts plaintext with **AES-256-GCM** via Web Crypto API (random 96-bit IV, PBKDF2-derived key at 210,000 iterations).
+3. Client encrypts plaintext with **AES-256-GCM** via Web Crypto API (random 96-bit IV, PBKDF2-derived key at 600,000 iterations).
 4. Client sends encrypted data + Argon2id hash to server.
 5. Server re-hashes with **Argon2id** using server `secret_key` as additional input.
 6. Server stores encrypted data + server-side hash.
@@ -255,6 +268,7 @@ Storage backends must subclass `store` and implement:
 | `get_secret(secret_id)` | Return secret object or `False`. |
 | `set_secret(s)` | Save a secret object. |
 | `delete_secret(secret_id)` | Delete a secret. |
+| `update_secret(s)` | Save changes to an existing secret; return `False` without writing if it no longer exists (never recreates a claimed secret). |
 | `claim_secret(secret_id)` | Atomically delete and return `True` if it existed (for one-time secrets). |
 | `delete_expired()` | Iterate stored secrets and delete any where `is_expired()` returns `True`. |
 
@@ -274,11 +288,11 @@ docker run -it --rm --name whisper -p 8000:8000 \
 
 ```bash
 # Standard build
-docker build -t whisper:0.2.1 .
+docker build -t whisper:0.2.2 .
 
 # Cross-platform build
 docker buildx build --platform=linux/amd64,linux/arm64 \
-    -t whisper:0.2.1 .
+    -t whisper:0.2.2 .
 ```
 
 ### Tech Stack
