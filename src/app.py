@@ -23,7 +23,7 @@ from whisper import (
 )
 from whisper.storage import store
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 app = Flask("whisper")
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=0)
@@ -105,7 +105,7 @@ def create_secret():
 
     # This has to be here in order for Flask to check against MAX_CONTENT_LENGTH
     # See: https://github.com/pallets/flask/issues/2690
-    request.data
+    request.get_data(cache=True)
     # strict version check — reject anything other than the currently supported
     # format rather than silently coercing.
     version = data.get("version", CURRENT_SECRET_VERSION)
@@ -170,18 +170,16 @@ def show_secret(secret_id):
     key_pass = s.get_key_pass(data["password"], config.secret_key)
     if not s.check_password(key_pass):
         app.logger.info(f"[{request.remote_addr}] Secret invalid password: {s.id}")
-        # increment failed attempts
+        # increment failed attempts. update_secret (not set_secret) so a secret
+        # claimed by a concurrent request is never written back into storage.
         s.failed_attempts = getattr(s, "failed_attempts", 0) + 1
-        store.set_secret(s)
+        store.update_secret(s)
         return jsonify({"result": "Invalid password."})
 
     # for one-time secrets, atomically claim before returning data
-    if s.is_one_time():
-        if not store.claim_secret(secret_id):
-            app.logger.info(
-                f"[{request.remote_addr}] Secret already claimed: {secret_id}"
-            )
-            return jsonify({"result": "This secret has already been retrieved."})
+    if s.is_one_time() and not store.claim_secret(secret_id):
+        app.logger.info(f"[{request.remote_addr}] Secret already claimed: {secret_id}")
+        return jsonify({"result": "This secret has already been retrieved."})
 
     # return the secret
     app.logger.info(f"[{request.remote_addr}] Secret retrieved: {s.id}")

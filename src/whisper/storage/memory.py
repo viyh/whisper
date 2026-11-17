@@ -1,3 +1,4 @@
+import copy
 import logging
 import threading
 
@@ -16,21 +17,37 @@ class memory(store):
         self.secrets = {}
 
     def get_secret(self, secret_id):
-        if not self.secrets.get(secret_id):
+        with self._lock:
+            s = self.secrets.get(secret_id)
+        if not s:
             return False
-        logger.debug(f"Reading memory secret: {self.secrets[secret_id].__dict__}")
-        return self.secrets[secret_id]
+        logger.debug(f"Reading memory secret: {secret_id}")
+        # return a copy so callers can't mutate stored state without going
+        # through set_secret/update_secret (matches the other backends)
+        return copy.copy(s)
 
     def set_secret(self, s):
         if not s.check_id():
             return False
-        self.secrets[s.id] = s
-        logger.debug(f"Saving memory secret: {self.secrets[s.id].__dict__}")
+        with self._lock:
+            self.secrets[s.id] = copy.copy(s)
+        logger.debug(f"Saving memory secret: {s.id}")
+        return True
+
+    def update_secret(self, s):
+        if not s.check_id():
+            return False
+        with self._lock:
+            if s.id not in self.secrets:
+                return False
+            self.secrets[s.id] = copy.copy(s)
+        logger.debug(f"Updating memory secret: {s.id}")
         return True
 
     def delete_secret(self, secret_id):
         logger.info(f"Deleting memory secret: {secret_id}")
-        self.secrets.pop(secret_id, None)
+        with self._lock:
+            self.secrets.pop(secret_id, None)
         return True
 
     def claim_secret(self, secret_id):
@@ -39,9 +56,11 @@ class memory(store):
             return self.secrets.pop(secret_id, None) is not None
 
     def delete_expired(self):
-        to_delete = []
-        for secret_id, s in self.secrets.items():
-            if not s or s.is_expired():
-                to_delete.append(secret_id)
+        with self._lock:
+            to_delete = [
+                secret_id
+                for secret_id, s in self.secrets.items()
+                if not s or s.is_expired()
+            ]
         for secret_id in to_delete:
             self.delete_secret(secret_id)
