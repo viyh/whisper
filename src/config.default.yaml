@@ -23,6 +23,12 @@ app_port: 5000
 # Base URL path for app, defaults to root
 app_url_base: /
 
+# Number of X-Forwarded-For entries added by proxies in front of this
+# container (load balancers, CDNs). nginx inside the container is always
+# trusted on top of this. Used to find the real client IP for rate limiting
+# and logs. 0 = clients connect directly. See README "Running Behind a Proxy".
+trusted_proxy_count: 0
+
 # Argon2id password hashing parameters (v2 secrets)
 # Higher values = more secure but slower. Must match on client and server.
 # OWASP minimum: time=3, memory=65536 (64MB), parallelism=1

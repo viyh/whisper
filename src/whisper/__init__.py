@@ -6,6 +6,7 @@ import time
 
 import argon2
 import yaml
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 logger = logging.getLogger("whisper")
 
@@ -111,6 +112,7 @@ def load_config(config_filenames=None):
         "argon2_time_cost": DEFAULT_ARGON2_TIME_COST,
         "argon2_memory_cost": DEFAULT_ARGON2_MEMORY_COST,
         "argon2_parallelism": DEFAULT_ARGON2_PARALLELISM,
+        "trusted_proxy_count": 0,
     }
 
     # initialize config with default values (copy — we mutate this below and
@@ -134,6 +136,25 @@ def load_config(config_filenames=None):
                 raise ConfigError(message=f"Config error: {e}")
     # check that loaded config is set correctly and return the config object
     return check_config(config, default_config)
+
+
+def apply_proxy_fix(wsgi_app, trusted_proxy_count=0):
+    """Wrap a WSGI app so ``request.remote_addr`` is the real client IP.
+
+    nginx inside the container always appends the address it received the
+    connection from to X-Forwarded-For, so one hop is always trusted.
+    ``trusted_proxy_count`` is how many more X-Forwarded-For entries are added
+    by proxies in front of the container (load balancers, CDNs). Too low and
+    every client shares the proxy's IP (one global rate limit); too high and
+    clients can spoof their IP via X-Forwarded-For.
+    """
+    if (
+        isinstance(trusted_proxy_count, bool)
+        or not isinstance(trusted_proxy_count, int)
+        or trusted_proxy_count < 0
+    ):
+        raise ConfigError("trusted_proxy_count", "Must be a non-negative integer")
+    return ProxyFix(wsgi_app, x_for=1 + trusted_proxy_count, x_proto=1, x_host=0)
 
 
 def class_loader(classname, *args, **kwargs):
