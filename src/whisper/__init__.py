@@ -34,7 +34,7 @@ class AttrDict(dict):
     """Object with dict keys also accessible as attributes"""
 
     def __init__(self, mapping=None):
-        super(AttrDict, self).__init__()
+        super().__init__()
         if mapping is not None:
             for key, value in mapping.items():
                 self.__setitem__(key, value)
@@ -42,7 +42,7 @@ class AttrDict(dict):
     def __setitem__(self, key, value):
         if isinstance(value, dict):
             value = AttrDict(value)
-        super(AttrDict, self).__setitem__(key, value)
+        super().__setitem__(key, value)
         self.__dict__[key] = value
 
     def __getattr__(self, item):
@@ -83,20 +83,22 @@ class ConfigUnknownError(ConfigError):
 def check_config(config_dict, default_config_dict):
     """Confirm that all variables are set and no non-existant variables are set."""
     # check that all keys in the default config have a value set in the config
-    for k, v in default_config_dict.items():
+    for k in default_config_dict:
         if config_dict.get(k) is None:
             raise ConfigMissingError(k, "Missing configuration parameter")
 
     # check that no extra configuration keys are set
-    for k, v in config_dict.items():
-        if k not in default_config_dict.keys():
+    for k in config_dict:
+        if k not in default_config_dict:
             raise ConfigUnknownError(k, "Unknown configuration parameter")
 
     return AttrDict(config_dict)
 
 
-def load_config(config_filenames=["config.yaml"]):
+def load_config(config_filenames=None):
     """Load configuration file and set default values"""
+    if config_filenames is None:
+        config_filenames = ["config.yaml"]
     default_config = {
         "secret_key": None,  # nosec B105
         "storage_class": None,
@@ -166,8 +168,8 @@ CURRENT_SECRET_VERSION = 2
 class secret:
     """Secret Class"""
 
-    REQUIRED_ATTRS = {"id", "create_date", "expire_date", "data", "hash"}
-    OPTIONAL_ATTRS = {"version", "failed_attempts"}
+    REQUIRED_ATTRS = frozenset({"id", "create_date", "expire_date", "data", "hash"})
+    OPTIONAL_ATTRS = frozenset({"version", "failed_attempts"})
 
     def __init__(self, secret_id=None, expiration=None, key_pass=None, data=None):
         self.id = secret_id

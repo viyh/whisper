@@ -1,10 +1,11 @@
-FROM python:3.13-slim
+FROM python:3.14-slim
 
 ENV WEB_PORT=8000
 ENV LOG_LEVEL=INFO
 
 RUN mkdir -p /usr/src/app \
     && apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
     && apt-get install -y --no-install-recommends \
         nginx \
         gettext-base \
