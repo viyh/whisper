@@ -1,2 +1,6 @@
 src/config.yaml
 .aws/
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.ruff_cache
