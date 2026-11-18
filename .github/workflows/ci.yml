@@ -32,9 +32,21 @@ jobs:
 
   docker:
     runs-on: ubuntu-latest
+    # The base images come from Docker Hardened Images (dhi.io), which need a
+    # Docker login. Set the DOCKERHUB_USERNAME and DOCKERHUB_TOKEN (read-only
+    # access token) repository secrets. Fork PRs don't get secrets, so the
+    # build is skipped there.
+    env:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v5
-      - run: docker build .
+      - if: env.DOCKERHUB_TOKEN == ''
+        run: echo "::notice::DOCKERHUB_USERNAME/DOCKERHUB_TOKEN not set, skipping image build"
+      - if: env.DOCKERHUB_TOKEN != ''
+        run: echo "$DOCKERHUB_TOKEN" | docker login dhi.io -u "$DOCKERHUB_USERNAME" --password-stdin
+      - if: env.DOCKERHUB_TOKEN != ''
+        run: docker build .
 
   deps-audit:
     runs-on: ubuntu-latest

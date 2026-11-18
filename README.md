@@ -62,16 +62,19 @@ See [Security Details](#security-details) for the full cryptographic design.
 export SECRET_KEY=$(head /dev/urandom | LC_ALL=C tr -dc 'A-Za-z0-9' | head -c 48)
 sed "s/CHANGE_ME_TO_A_RANDOM_STRING_OF_32_OR_MORE_CHARACTERS/$SECRET_KEY/" src/config.default.yaml > config.yaml
 
-# Build from source (optional, can also pull viyh/whisper:0.2.2):
+# Build from source (optional, can also pull viyh/whisper:0.3.0).
+# The base images need a free Docker account: docker login dhi.io
 # docker build -t viyh/whisper .
 
 # Run
 docker run -d --name whisper -p 8000:8000 \
     -v $(pwd)/config.yaml:/usr/src/app/config.yaml \
-    viyh/whisper:0.2.2
+    viyh/whisper:0.3.0
 ```
 
 Browse to http://localhost:8000
+
+For anything beyond local testing, Whisper must run behind a TLS-terminating proxy (a cloud load balancer, Cloud Run, Caddy, Traefik, ...). See [Deploying](#deploying).
 
 ## Configuration
 
@@ -91,8 +94,8 @@ Copy `src/config.default.yaml` to `config.yaml` and customize. Mount it into the
 | `storage_config` | `{}` | Backend-specific settings (bucket name, path, etc.) |
 | `storage_clean_interval` | `900` | Seconds between expired secret cleanup runs. |
 | `max_data_size_kb` | `100` | Maximum upload size in KB. |
-| `app_listen_ip` | `0.0.0.0` | Internal listen address. |
-| `app_port` | `5000` | Internal Flask port (nginx proxies externally). |
+| `app_listen_ip` | `0.0.0.0` | Listen address for the development server (`python app.py`) only. |
+| `app_port` | `5000` | Port for the development server only. In the container, see `WEB_PORT`. |
 | `app_url_base` | `/` | URL base path (e.g., `/whisper/` for subpath hosting). |
 | `argon2_time_cost` | `5` | Argon2id time cost parameter. Higher = slower + more secure. |
 | `argon2_memory_cost` | `131072` | Argon2id memory cost in KB (131072 = 128 MB). |
@@ -103,21 +106,34 @@ Copy `src/config.default.yaml` to `config.yaml` and customize. Mount it into the
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `WEB_PORT` | `8000` | External nginx listen port. |
+| `WEB_PORT` | `8000` | Port the container listens on. |
+| `WEB_THREADS` | `2` | Concurrent requests handled. Each in-flight password hash uses `argon2_memory_cost` of RAM (128 MB by default), so allow about 128 MB per thread plus 100 MB. |
 | `LOG_LEVEL` | `INFO` | Set to `DEBUG` for verbose logging. |
 | `CONFIG_FILE` | `config.yaml` | Config file path inside the container. |
+| `WHISPER_CONFIG` | | The config YAML itself. If set, used instead of `CONFIG_FILE`. For platforms that inject secrets as environment variables (e.g. ECS). |
 
 ### Running Behind a Proxy
 
-Whisper rate-limits and logs by client IP. nginx inside the container is always trusted, but any load balancer or CDN in front of the container adds its own `X-Forwarded-For` entries, and Whisper needs to know how many to skip to find the real client. If this is too low, every visitor appears to come from the proxy and shares a single rate limit, so one client can block retrievals for everyone. If it is too high, clients can spoof their IP and dodge the limit.
+Whisper rate-limits and logs by client IP. Any load balancer or CDN in front of the container adds its own `X-Forwarded-For` entries, and Whisper needs to know how many to skip to find the real client. If this is too low, every visitor appears to come from the proxy and shares a single rate limit, so one client can block retrievals for everyone. If it is too high, clients can spoof their IP and dodge the limit.
 
 | Deployment | `trusted_proxy_count` |
 |------------|-----------------------|
 | Clients connect directly to the container | `0` |
-| One proxy that appends the client IP (e.g. AWS ALB, a reverse proxy) | `1` |
+| One proxy that appends the client IP (e.g. AWS ALB, Caddy, Traefik, nginx) | `1` |
+| Google Cloud Run (`*.run.app` URL or domain mapping) | `1` |
 | Proxy that appends the client IP and its own IP (e.g. Google Cloud external Application Load Balancer) | `2` |
 
-Proxy behavior varies, so verify after deploying: each request is logged as `[<ip>] ...`, and that IP should be your own public address, not a private or load balancer address.
+Proxy behavior varies, so verify after deploying: each request is logged as `[<ip>] ...`, and that IP should be your own public address, not a private or load balancer address. Also check that a request with a fake `X-Forwarded-For: 1.2.3.4` header is still logged with your real IP; if not, the value is too high.
+
+## Deploying
+
+Whisper needs HTTPS in front of it: the browser crypto APIs require a secure context, and responses set HSTS. The container runs gunicorn directly and should not be exposed to the internet without a proxy, which also protects it from slow clients.
+
+- **[`examples/terraform/gcp`](examples/terraform/gcp)**: Cloud Run with a domain mapping, GCS storage, and the config in Secret Manager.
+- **[`examples/terraform/aws`](examples/terraform/aws)**: ECS Fargate behind an ALB with an ACM certificate, S3 storage, and the config in Secrets Manager.
+- **[`examples/docker-compose.yaml`](examples/docker-compose.yaml)**: a single host, to put behind your own reverse proxy.
+
+Use the GCS or S3 backend on Cloud Run or ECS; local and in-memory storage lose secrets when the container restarts or is replaced. Keep one instance (or task), since rate limits are kept in memory per instance.
 
 ## Storage Backends
 
@@ -204,7 +220,9 @@ storage.multipartUploads.listParts, storage.multipartUploads.list,
 storage.buckets.get
 ```
 
-Or use built-in roles: `roles/storage.legacyObjectOwner` + `roles/storage.legacyBucketWriter`.
+Or use built-in roles on the bucket: `roles/storage.objectUser` + `roles/storage.legacyBucketReader`.
+
+Disable the bucket's soft delete policy and object versioning so deleted secrets are really gone.
 
 ## Security Details
 
@@ -254,7 +272,7 @@ If you have a pre-0.2.0 secret link that was created with the v1 format (PBKDF2 
 
 ### Rate Limiting
 
-The default in-memory rate limiter (`storage_uri="memory://"`) tracks state per-gunicorn-worker. In multi-worker or multi-container deployments, each worker enforces limits independently. For shared rate-limit state across workers, configure a Redis backend via [flask-limiter](https://flask-limiter.readthedocs.io/).
+The default in-memory rate limiter (`storage_uri="memory://"`) keeps state in the container's single gunicorn process. With multiple containers or instances, each one enforces limits independently. For shared rate-limit state across workers, configure a Redis backend via [flask-limiter](https://flask-limiter.readthedocs.io/).
 
 ## Development
 
@@ -286,18 +304,20 @@ docker run -it --rm --name whisper -p 8000:8000 \
 
 ### Building
 
+The image builds on [Docker Hardened Images](https://dhi.io), which are free but need a Docker account: run `docker login dhi.io` first. The runtime image has no shell or package manager.
+
 ```bash
 # Standard build
-docker build -t whisper:0.2.2 .
+docker build -t whisper:0.3.0 .
 
 # Cross-platform build
 docker buildx build --platform=linux/amd64,linux/arm64 \
-    -t whisper:0.2.2 .
+    -t whisper:0.3.0 .
 ```
 
 ### Tech Stack
 
-**Backend**: Python 3.14, Flask 3.1, Gunicorn 27, Nginx (Debian Slim)
+**Backend**: Python 3.14, Flask 3.1, Gunicorn 27 (Docker Hardened Images, Debian 13)
 
 **Client-side crypto**: Web Crypto API (AES-256-GCM, PBKDF2), argon2-browser (WASM)
 

@@ -64,3 +64,28 @@ def test_missing_file_falls_back_to_defaults(tmp_path):
     # config is still missing required keys, so loading fails at check_config.
     with pytest.raises(ConfigMissingError):
         load_config(config_filenames=[str(tmp_path / "does-not-exist.yaml")])
+
+
+def test_config_text_takes_precedence_over_files(tmp_path):
+    file_path = _write(tmp_path, VALID_CONFIG)
+    text = VALID_CONFIG.replace("abcdefghijklmnopqrstuvwxyz_0123456", "from_env_" + "x" * 30)
+    cfg = load_config(config_filenames=[file_path], config_text=text)
+    assert cfg.secret_key == "from_env_" + "x" * 30
+
+
+def test_config_text_minimal_uses_defaults():
+    cfg = load_config(
+        config_text='secret_key: "k"\nstorage_class: whisper.storage.memory.memory\n'
+    )
+    assert cfg.trusted_proxy_count == 0
+    assert cfg.max_data_size_kb == 100
+
+
+def test_config_text_rejects_non_mapping():
+    with pytest.raises(ConfigError):
+        load_config(config_text="- just\n- a list\n")
+
+
+def test_empty_config_file_reports_missing_keys(tmp_path):
+    with pytest.raises(ConfigMissingError):
+        load_config(config_filenames=[_write(tmp_path, "")])

@@ -180,3 +180,19 @@ def test_failed_attempt_does_not_resurrect_claimed_secret(client, app_module):
     loaded.failed_attempts += 1
     assert app_module.store.update_secret(loaded) is False  # ...write-back is a no-op
     assert app_module.store.get_secret(sid) is False
+
+
+def test_security_headers_on_pages_and_api(client):
+    for r in (client.get("/"), _create(client), client.get("/assets/style.css")):
+        assert r.headers["X-Frame-Options"] == "DENY"
+        assert r.headers["X-Content-Type-Options"] == "nosniff"
+        assert r.headers["Referrer-Policy"] == "no-referrer"
+        assert "frame-ancestors 'none'" in r.headers["Content-Security-Policy"]
+        assert "'unsafe-inline'" not in r.headers["Content-Security-Policy"].split("script-src")[1].split(";")[0]
+        assert r.headers["Strict-Transport-Security"].startswith("max-age=63072000")
+
+
+def test_health_check(client):
+    r = client.get("/elb-status")
+    assert r.status_code == 200
+    assert r.get_data(as_text=True) == "OK"

@@ -96,8 +96,30 @@ def check_config(config_dict, default_config_dict):
     return AttrDict(config_dict)
 
 
-def load_config(config_filenames=None):
-    """Load configuration file and set default values"""
+def _parse_config_yaml(stream, source):
+    """Parse one YAML config document into a dict."""
+    try:
+        loaded = yaml.load(stream, Loader=UniqueKeyLoader)  # nosec B506
+    except ValueError as e:
+        # error on duplicate keys
+        raise ConfigError(config_key=e, message="Duplicate key in configuration file")
+    except yaml.YAMLError as e:
+        # error on unparseable YAML
+        raise ConfigError(message=f"Config error: {e}")
+    if loaded is None:
+        return {}
+    if not isinstance(loaded, dict):
+        raise ConfigError(config_key=source, message="Config must be a YAML mapping")
+    return loaded
+
+
+def load_config(config_filenames=None, config_text=None):
+    """Load configuration and set default values.
+
+    ``config_text`` (YAML), when given, is used instead of the config files.
+    The container passes the WHISPER_CONFIG environment variable here, for
+    platforms that can inject secrets as environment variables but not files.
+    """
     if config_filenames is None:
         config_filenames = ["config.yaml"]
     default_config = {
@@ -118,22 +140,15 @@ def load_config(config_filenames=None):
     # initialize config with default values (copy — we mutate this below and
     # don't want to pollute default_config, which check_config compares against)
     config = dict(default_config)
+    if config_text is not None:
+        config.update(_parse_config_yaml(config_text, "WHISPER_CONFIG"))
+        return check_config(config, default_config)
     for config_filename in config_filenames:
         if not os.path.exists(config_filename):
             logger.error(f"Config file does not exist, skipping. {config_filename}")
             continue
         with open(config_filename, "r") as config_file:
-            try:
-                # load YAML config file
-                config.update(yaml.load(config_file, Loader=UniqueKeyLoader))  # nosec B506
-            except ValueError as e:
-                # error on duplicate keys
-                raise ConfigError(
-                    config_key=e, message="Duplicate key in configuration file"
-                )
-            except yaml.YAMLError as e:
-                # error on unparseable YAML
-                raise ConfigError(message=f"Config error: {e}")
+            config.update(_parse_config_yaml(config_file, config_filename))
     # check that loaded config is set correctly and return the config object
     return check_config(config, default_config)
 
@@ -141,12 +156,11 @@ def load_config(config_filenames=None):
 def apply_proxy_fix(wsgi_app, trusted_proxy_count=0):
     """Wrap a WSGI app so ``request.remote_addr`` is the real client IP.
 
-    nginx inside the container always appends the address it received the
-    connection from to X-Forwarded-For, so one hop is always trusted.
-    ``trusted_proxy_count`` is how many more X-Forwarded-For entries are added
-    by proxies in front of the container (load balancers, CDNs). Too low and
-    every client shares the proxy's IP (one global rate limit); too high and
-    clients can spoof their IP via X-Forwarded-For.
+    ``trusted_proxy_count`` is how many X-Forwarded-For entries are added by
+    proxies in front of the container (load balancers, CDNs). With 0, clients
+    connect directly and X-Forwarded-For is ignored. Too low and every client
+    shares the proxy's IP (one global rate limit); too high and clients can
+    spoof their IP via X-Forwarded-For.
     """
     if (
         isinstance(trusted_proxy_count, bool)
@@ -154,7 +168,11 @@ def apply_proxy_fix(wsgi_app, trusted_proxy_count=0):
         or trusted_proxy_count < 0
     ):
         raise ConfigError("trusted_proxy_count", "Must be a non-negative integer")
-    return ProxyFix(wsgi_app, x_for=1 + trusted_proxy_count, x_proto=1, x_host=0)
+    if trusted_proxy_count == 0:
+        return wsgi_app
+    # proxies overwrite (rather than append to) X-Forwarded-Proto, so only
+    # the nearest one is trusted for the scheme
+    return ProxyFix(wsgi_app, x_for=trusted_proxy_count, x_proto=1, x_host=0)
 
 
 def class_loader(classname, *args, **kwargs):
