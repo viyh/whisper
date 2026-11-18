@@ -22,9 +22,10 @@ from whisper import (
     secret,
     short_id,
 )
+from whisper.log_redaction import install_redaction
 from whisper.storage import store
 
-__version__ = "0.3.1"
+__version__ = "0.3.2"
 
 app = Flask("whisper")
 
@@ -32,6 +33,11 @@ if __name__ != "__main__":
     gunicorn_logger = logging.getLogger("gunicorn.error")
     app.logger.handlers = gunicorn_logger.handlers
     app.logger.setLevel(gunicorn_logger.level)
+
+# Shorten secret IDs in everything written through the app logger's handlers,
+# including Flask's own "Exception on /<path>" lines and tracebacks. Whisper's
+# module loggers (whisper.storage.*) propagate here too.
+install_redaction(app.logger)
 
 # load configuration file
 # (WHISPER_CONFIG, if set, holds the YAML itself and takes precedence)

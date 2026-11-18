@@ -30,7 +30,7 @@ ENV PATH=/opt/venv/bin:$PATH \
 # runtime image has no shell, so this runs Python directly (exec-form RUN).
 # (numeric uid: the image has no "root" entry in /etc/passwd)
 USER 0
-RUN ["python3", "-c", "import glob, os, shutil\nfor pattern in ('/usr/lib/python3/dist-packages/*', '/usr/bin/pip', '/usr/bin/pip3'):\n    for path in glob.glob(pattern):\n        shutil.rmtree(path) if os.path.isdir(path) and not os.path.islink(path) else os.remove(path)"]
+RUN ["python3", "-c", "import glob, os, shutil\nd = '/usr/lib/python3/dist-packages/'\nnames = ('pip', 'pip-*.dist-info', 'setuptools', 'setuptools-*.dist-info', 'wheel', 'wheel-*.dist-info', '_distutils_hack', 'distutils-precedence.pth')\npaths = [p for n in names for p in glob.glob(d + n)] + [p for p in ('/usr/bin/pip', '/usr/bin/pip3') if os.path.lexists(p)]\nfor p in paths:\n    shutil.rmtree(p) if os.path.isdir(p) and not os.path.islink(p) else os.remove(p)\nprint('removed:', *sorted(paths))"]
 
 COPY --from=build /opt/venv /opt/venv
 COPY --from=build /usr/src/app /usr/src/app

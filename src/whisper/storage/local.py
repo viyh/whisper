@@ -84,7 +84,7 @@ class local(store):
             with open(secret_filename) as secret_file:
                 s.load_from_dict(json.load(secret_file))
         except (OSError, ValueError) as e:
-            reason = e.strerror if isinstance(e, OSError) else e
+            reason = (e.strerror or type(e).__name__) if isinstance(e, OSError) else e
             secret_id = os.path.splitext(os.path.basename(secret_filename))[0]
             logger.error(f"Could not load secret {short_id(secret_id)}: {reason}")
         if not s.check_id():

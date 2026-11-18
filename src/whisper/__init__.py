@@ -193,7 +193,11 @@ def short_id(secret_id):
     return "".join(c for c in secret_id[:8] if c in _LOG_ID_CHARS) + "..."
 
 
-_SECRET_ID_PATTERN = re.compile(r"\b[0-9a-f]{40}\b")
+# Any run of 40+ hex characters, in either case and whatever surrounds it, so
+# IDs are caught after a URL base without a trailing slash ("/s<id>") or next
+# to percent-encoding ("%2F<id>"). Longer hex strings (e.g. digests) are
+# shortened too, which is harmless in logs.
+_SECRET_ID_PATTERN = re.compile(r"[0-9A-Fa-f]{40,}")
 
 
 def redact_secret_ids(text):
