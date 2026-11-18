@@ -52,14 +52,14 @@ See [Security Details](#security-details) for the full cryptographic design.
 export SECRET_KEY=$(head /dev/urandom | LC_ALL=C tr -dc 'A-Za-z0-9' | head -c 48)
 sed "s/CHANGE_ME_TO_A_RANDOM_STRING_OF_32_OR_MORE_CHARACTERS/$SECRET_KEY/" src/config.default.yaml > config.yaml
 
-# Build from source (optional, can also pull viyh/whisper:0.3.2).
+# Build from source (optional, can also pull viyh/whisper:0.4.0).
 # The base images need a free Docker account: docker login dhi.io
 # docker build -t viyh/whisper .
 
 # Run
 docker run -d --name whisper -p 8000:8000 \
     -v $(pwd)/config.yaml:/usr/src/app/config.yaml \
-    viyh/whisper:0.3.2
+    viyh/whisper:0.4.0
 ```
 
 Browse to http://localhost:8000
@@ -303,11 +303,11 @@ The image builds on [Docker Hardened Images](https://dhi.io), which are free but
 
 ```bash
 # Standard build
-docker build -t whisper:0.3.2 .
+docker build -t whisper:0.4.0 .
 
 # Cross-platform build
 docker buildx build --platform=linux/amd64,linux/arm64 \
-    -t whisper:0.3.2 .
+    -t whisper:0.4.0 .
 ```
 
 ### Tech Stack
