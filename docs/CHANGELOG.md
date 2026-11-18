@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-11-17
+
+### Changed
+* Container rebuilt on [Docker Hardened Images](https://dhi.io) (`dhi.io/python:3.14-debian13`) with a two-stage build. The runtime image has no shell or package manager, pip is removed from the app's virtualenv, and tests are no longer shipped. The image is 232 MB (was 420 MB) with roughly a third of the previously reported OS-level CVEs and none with an available fix.
+* nginx removed. Gunicorn now serves requests directly with threaded workers (`WEB_THREADS`, default 2), request timeouts, and request line/header limits. Security headers (CSP, HSTS, X-Frame-Options, etc.) and the `/elb-status` health check moved into Flask, unchanged. Whisper must run behind a TLS-terminating proxy, which the README now documents under "Deploying".
+* `trusted_proxy_count` keeps its meaning (number of `X-Forwarded-For` entries added by proxies in front of the container); existing values stay correct.
+* Building from source needs `docker login dhi.io` (free Docker account). CI logs in using the `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` repository secrets and skips the image build when they are not set.
+
+### Added
+* `WHISPER_CONFIG` environment variable: the config YAML itself, used instead of `CONFIG_FILE` when set. For platforms that inject secrets as environment variables but not files (e.g. ECS).
+* Terraform examples for GCP (Cloud Run, GCS, Secret Manager, domain mapping) and AWS (ECS Fargate, ALB, ACM, S3, Secrets Manager) in `examples/terraform`.
+* README "Deploying" section and Cloud Run guidance for `trusted_proxy_count`.
+
+### Removed
+* nginx, `scripts/run.sh`, and `src/nginx.template.conf`.
+* The outdated CloudFormation example, replaced by the Terraform examples.
+
+### Fixed
+* An empty or non-mapping config file now gives a clear configuration error instead of a crash.
+
+### Upgrading from 0.2.x
+* Drop-in for config, ports (`WEB_PORT`, default 8000), health check path, and file ownership (still runs as uid 65534).
+* There is no shell in the image: `docker exec ... sh` and custom entrypoints or command overrides that use `/run.sh` no longer work.
+* Up to `WEB_THREADS` password hashes run at once (0.2.x ran one), each using `argon2_memory_cost` of RAM. The default of 2 fits a 512 MB container.
+
 ## [0.2.2] - 2026-11-17
 
 ### Security

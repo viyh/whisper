@@ -12,21 +12,19 @@ secret_key: 'CHANGE_ME_TO_A_RANDOM_STRING_OF_32_OR_MORE_CHARACTERS'
 # Interval in seconds that the secret storage cleaner will run
 storage_clean_interval: 900
 
-# Listen IP within the docker container, generally this shouldn't be changed
+# Listen IP and port for the development server (python app.py) only. In the
+# container, gunicorn listens on 0.0.0.0 and the WEB_PORT environment variable
+# (see README).
 app_listen_ip: 0.0.0.0
-
-# Listen port within the docker container, generally this shouldn't be changed.
-# To set the port for the exposed nginx web service, see the README for
-# infomation about the WEB_PORT environment variable.
 app_port: 5000
 
 # Base URL path for app, defaults to root
 app_url_base: /
 
 # Number of X-Forwarded-For entries added by proxies in front of this
-# container (load balancers, CDNs). nginx inside the container is always
-# trusted on top of this. Used to find the real client IP for rate limiting
-# and logs. 0 = clients connect directly. See README "Running Behind a Proxy".
+# container (load balancers, CDNs). Used to find the real client IP for rate
+# limiting and logs. 0 = clients connect directly. See README "Running Behind
+# a Proxy".
 trusted_proxy_count: 0
 
 # Argon2id password hashing parameters (v2 secrets)
