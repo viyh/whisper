@@ -89,3 +89,11 @@ def test_config_text_rejects_non_mapping():
 def test_empty_config_file_reports_missing_keys(tmp_path):
     with pytest.raises(ConfigMissingError):
         load_config(config_filenames=[_write(tmp_path, "")])
+
+
+def test_short_id():
+    from whisper import short_id
+
+    assert short_id("0123456789abcdef" * 2 + "01234567") == "01234567..."
+    assert short_id("ab\ncd") == "abcd..."
+    assert short_id(None) == "..."

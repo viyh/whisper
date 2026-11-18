@@ -5,7 +5,7 @@ the container: the client itself, or the nearest proxy. Each proxy in front
 appends the address it received the connection from to X-Forwarded-For."""
 
 import pytest
-from flask import Flask, request
+from flask import Flask, jsonify, request
 
 from whisper import ConfigError, apply_proxy_fix
 
@@ -21,13 +21,14 @@ def _client_ip(trusted_proxy_count, remote_addr, xff=None):
 
     @app.route("/")
     def ip():
-        return request.remote_addr
+        # JSON, not HTML, so the reflected value can't be rendered as markup
+        return jsonify(ip=request.remote_addr)
 
     headers = {"X-Forwarded-For": xff} if xff else {}
     with app.test_client() as c:
         return c.get(
             "/", headers=headers, environ_base={"REMOTE_ADDR": remote_addr}
-        ).get_data(as_text=True)
+        ).get_json()["ip"]
 
 
 def test_direct_client():
