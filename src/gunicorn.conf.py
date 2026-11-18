@@ -37,3 +37,6 @@ errorlog = "-"
 # The control socket (for gunicornc) defaults to $HOME, which doesn't exist
 # for the nobody user; whisper doesn't use it.
 control_socket_disable = True
+
+# Shorten secret IDs (share links) in access log request lines
+logger_class = "whisper.gunicorn_logging.RedactingLogger"

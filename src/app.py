@@ -20,10 +20,11 @@ from whisper import (
     create_argon2_hasher,
     load_config,
     secret,
+    short_id,
 )
 from whisper.storage import store
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 
 app = Flask("whisper")
 
@@ -166,7 +167,7 @@ def create_secret():
         key_pass=s.get_key_pass(password, config.secret_key),
         data=encrypted_data,
     )
-    app.logger.info(f"[{request.remote_addr}] Secret create: {s.id}")
+    app.logger.info(f"[{request.remote_addr}] Secret create: {short_id(s.id)}")
     # store the secret
     store.set_secret(s)
     return jsonify({"id": s.id})
@@ -179,7 +180,7 @@ def get_secret(secret_id):
     s = store.get_secret(secret_id)
     # if the secret exists, display the password page
     if s and s.check_id():
-        app.logger.info(f"[{request.remote_addr}] Secret request: {s.id}")
+        app.logger.info(f"[{request.remote_addr}] Secret request: {short_id(s.id)}")
         return render_template(
             "show.html",
             version=__version__,
@@ -204,19 +205,19 @@ def show_secret(secret_id):
     s = store.get_secret(secret_id)
     if not s or not s.check_id():
         app.logger.info(
-            f"[{request.remote_addr}] Secret invalid secret_id: {secret_id}"
+            f"[{request.remote_addr}] Secret invalid secret_id: {short_id(secret_id)}"
         )
         return jsonify({"result": "Invalid ID"})
 
     # check per-secret failed attempt lockout
     if hasattr(s, "failed_attempts") and s.failed_attempts >= 10:
-        app.logger.info(f"[{request.remote_addr}] Secret locked: {s.id}")
+        app.logger.info(f"[{request.remote_addr}] Secret locked: {short_id(s.id)}")
         return jsonify({"result": "This secret has been locked due to too many failed attempts."})
 
     # check the password
     key_pass = s.get_key_pass(data["password"], config.secret_key)
     if not s.check_password(key_pass):
-        app.logger.info(f"[{request.remote_addr}] Secret invalid password: {s.id}")
+        app.logger.info(f"[{request.remote_addr}] Secret invalid password: {short_id(s.id)}")
         # increment failed attempts. update_secret (not set_secret) so a secret
         # claimed by a concurrent request is never written back into storage.
         s.failed_attempts = getattr(s, "failed_attempts", 0) + 1
@@ -225,11 +226,11 @@ def show_secret(secret_id):
 
     # for one-time secrets, atomically claim before returning data
     if s.is_one_time() and not store.claim_secret(secret_id):
-        app.logger.info(f"[{request.remote_addr}] Secret already claimed: {secret_id}")
+        app.logger.info(f"[{request.remote_addr}] Secret already claimed: {short_id(secret_id)}")
         return jsonify({"result": "This secret has already been retrieved."})
 
     # return the secret
-    app.logger.info(f"[{request.remote_addr}] Secret retrieved: {s.id}")
+    app.logger.info(f"[{request.remote_addr}] Secret retrieved: {short_id(s.id)}")
     return jsonify(
         {
             "encrypted_data": s.data,

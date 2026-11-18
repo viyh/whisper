@@ -2,6 +2,7 @@ import copy
 import logging
 import threading
 
+from whisper import short_id
 from whisper.storage import store
 
 logger = logging.getLogger(__name__)
@@ -21,7 +22,7 @@ class memory(store):
             s = self.secrets.get(secret_id)
         if not s:
             return False
-        logger.debug(f"Reading memory secret: {secret_id}")
+        logger.debug(f"Reading memory secret: {short_id(secret_id)}")
         # return a copy so callers can't mutate stored state without going
         # through set_secret/update_secret (matches the other backends)
         return copy.copy(s)
@@ -31,7 +32,7 @@ class memory(store):
             return False
         with self._lock:
             self.secrets[s.id] = copy.copy(s)
-        logger.debug(f"Saving memory secret: {s.id}")
+        logger.debug(f"Saving memory secret: {short_id(s.id)}")
         return True
 
     def update_secret(self, s):
@@ -41,11 +42,11 @@ class memory(store):
             if s.id not in self.secrets:
                 return False
             self.secrets[s.id] = copy.copy(s)
-        logger.debug(f"Updating memory secret: {s.id}")
+        logger.debug(f"Updating memory secret: {short_id(s.id)}")
         return True
 
     def delete_secret(self, secret_id):
-        logger.info(f"Deleting memory secret: {secret_id}")
+        logger.info(f"Deleting memory secret: {short_id(secret_id)}")
         with self._lock:
             self.secrets.pop(secret_id, None)
         return True

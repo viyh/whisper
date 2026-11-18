@@ -196,3 +196,25 @@ def test_health_check(client):
     r = client.get("/elb-status")
     assert r.status_code == 200
     assert r.get_data(as_text=True) == "OK"
+
+
+def test_logs_never_contain_full_secret_ids(client, caplog):
+    import logging
+
+    caplog.set_level(logging.DEBUG)
+    sid = _create(client).get_json()["id"]
+    client.get(f"/{sid}")
+    client.post(f"/{sid}", json={"password": BAD_PW})
+    client.post(f"/{sid}", json={"password": GOOD_PW})
+    client.post(f"/{sid}", json={"password": GOOD_PW})  # already claimed
+    assert sid[:8] in caplog.text
+    assert sid not in caplog.text
+    assert sid[8:] not in caplog.text
+
+
+def test_invalid_id_from_url_cannot_inject_log_lines(client, caplog):
+    import logging
+
+    caplog.set_level(logging.INFO)
+    client.post("/" + "a" * 7 + "%0aFAKE", json={"password": "x"})
+    assert "FAKE" not in caplog.text
