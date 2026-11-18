@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.3.2] - Unreleased
+## [0.3.2] - 2026-11-17
 
 ### Security
 * Close the remaining ways full secret IDs could reach logs, found in code review of 0.3.1. Flask's own `Exception on /<path>` error lines, exception tracebacks (file paths, GCS object names), and gunicorn tracebacks and `critical` messages were not redacted. Redaction now happens once, in a logging filter on the shared gunicorn/app log handlers, so every line they write is covered, including tracebacks and stack info. `short_id()` at call sites remains as a first layer.
