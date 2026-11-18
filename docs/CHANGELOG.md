@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - Unreleased
+
+### Security
+* Close the remaining ways full secret IDs could reach logs, found in code review of 0.3.1. Flask's own `Exception on /<path>` error lines, exception tracebacks (file paths, GCS object names), and gunicorn tracebacks and `critical` messages were not redacted. Redaction now happens once, in a logging filter on the shared gunicorn/app log handlers, so every line they write is covered, including tracebacks and stack info. `short_id()` at call sites remains as a first layer.
+* Redaction now also matches uppercase IDs and IDs not separated by a slash, e.g. with an `app_url_base` that has no trailing slash or next to percent-encoding.
+
+### Fixed
+* The log-injection test could never fail (its payload was past the 8 characters `short_id` keeps); it now places the newline and payload inside them.
+* Local backend errors without an OS error reason logged `None`; they now log the error type.
+* The Dockerfile now removes pip, setuptools, and wheel from the base image by name, instead of everything in `/usr/lib/python3/dist-packages`, so a future base image change can't silently remove something needed.
+
+### Changed
+* `whisper.gunicorn_logging.RedactingLogger` only installs the filter; its per-method overrides are gone, which also removes per-request formatting work at the default log level.
+* Tests force the error paths (failing request, cleaner traceback, gunicorn access/error logs) and check that no full ID is written (98 tests).
+
 ## [0.3.1] - 2026-11-17
 
 ### Security
