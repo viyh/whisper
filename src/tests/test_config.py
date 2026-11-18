@@ -97,3 +97,42 @@ def test_short_id():
     assert short_id("0123456789abcdef" * 2 + "01234567") == "01234567..."
     assert short_id("ab\ncd") == "abcd..."
     assert short_id(None) == "..."
+
+
+def test_redact_secret_ids():
+    from whisper import redact_secret_ids
+
+    sid = "0123456789abcdef" * 2 + "01234567"
+    assert redact_secret_ids(f"POST /{sid} HTTP/1.1") == "POST /01234567... HTTP/1.1"
+    assert redact_secret_ids(f"https://w.example/{sid}?x=1") == "https://w.example/01234567...?x=1"
+    assert redact_secret_ids("GET /assets/style.css") == "GET /assets/style.css"
+
+
+def test_gunicorn_access_log_redacts_secret_ids():
+    from types import SimpleNamespace
+
+    from gunicorn.config import Config
+
+    from whisper.gunicorn_logging import RedactingLogger
+
+    sid = "0123456789abcdef" * 2 + "01234567"
+    logger = RedactingLogger(Config())
+    req = SimpleNamespace(
+        method="POST", path=f"/{sid}", query="", version=(1, 1),
+        uri=f"/{sid}", headers=[("REFERER", f"https://w.example/{sid}")],
+    )
+    resp = SimpleNamespace(status="200 OK", sent=10, headers=[])
+    environ = {
+        "REMOTE_ADDR": "203.0.113.9",
+        "REQUEST_METHOD": "POST",
+        "RAW_URI": f"/{sid}",
+        "PATH_INFO": f"/{sid}",
+        "QUERY_STRING": "",
+        "SERVER_PROTOCOL": "HTTP/1.1",
+        "HTTP_REFERER": f"https://w.example/{sid}",
+    }
+    from datetime import timedelta
+
+    atoms = logger.atoms(resp, req, environ, timedelta(seconds=0.1))
+    assert sid not in " ".join(str(v) for v in atoms.values())
+    assert "01234567..." in atoms["r"]

@@ -9,12 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 * Logs no longer contain full secret IDs. A secret ID is the random part of the share link, so anyone who could read the logs could see every live link, then try passwords against it or trip its failed-attempt lockout. Logs now show the first 8 characters (enough to correlate lines for one secret), and storage backends no longer log file paths or object keys that contain the full ID. IDs taken from the URL are also stripped of non-hex characters before logging, so they can't inject log lines.
+* Gunicorn's access log (request path and Referer) and its DEBUG request lines also showed full secret IDs. A custom gunicorn logger now shortens any secret ID in its output the same way. Platform request logs outside the container (Cloud Run, ALB access logs) still record full URLs.
+* Removed the base image's unused system pip, setuptools, and wheel from the runtime image. pip's vendored setuptools metadata (70.3.0, CVE-2025-47273) was the only fixable finding in Docker Scout; it was not exploitable, as pip only vendors `pkg_resources` and nothing runs pip at runtime.
 
 ### Fixed
 * CodeQL `py/reflective-xss` alert in a test-only helper (`test_proxy.py`), which now returns JSON.
 
 ### Added
-* Tests that full secret IDs never appear in logs and that URL input can't inject log lines (92 tests).
+* Tests that full secret IDs never appear in app or gunicorn logs and that URL input can't inject log lines (94 tests).
 
 ## [0.3.0] - 2026-11-17
 

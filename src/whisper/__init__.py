@@ -1,6 +1,7 @@
 import importlib
 import logging
 import os
+import re
 import secrets
 import time
 
@@ -190,6 +191,14 @@ def short_id(secret_id):
     if not isinstance(secret_id, str):
         return "..."
     return "".join(c for c in secret_id[:8] if c in _LOG_ID_CHARS) + "..."
+
+
+_SECRET_ID_PATTERN = re.compile(r"\b[0-9a-f]{40}\b")
+
+
+def redact_secret_ids(text):
+    """Shorten every secret ID (40 hex characters) in text, e.g. URLs."""
+    return _SECRET_ID_PATTERN.sub(lambda m: m.group(0)[:8] + "...", text)
 
 
 def class_loader(classname, *args, **kwargs):
