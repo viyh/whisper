@@ -38,5 +38,6 @@ errorlog = "-"
 # for the nobody user; whisper doesn't use it.
 control_socket_disable = True
 
-# Shorten secret IDs (share links) in access log request lines
+# Shorten secret IDs (share links) in everything gunicorn and the app log,
+# including access log lines and tracebacks (see whisper/log_redaction.py)
 logger_class = "whisper.gunicorn_logging.RedactingLogger"

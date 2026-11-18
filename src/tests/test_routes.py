@@ -216,5 +216,9 @@ def test_invalid_id_from_url_cannot_inject_log_lines(client, caplog):
     import logging
 
     caplog.set_level(logging.INFO)
-    client.post("/" + "a" * 7 + "%0aFAKE", json={"password": "x"})
-    assert "FAKE" not in caplog.text
+    # the newline and payload fall inside the 8 characters short_id keeps
+    client.post("/aa%0aZZZZ", json={"password": "x"})
+    logged = [r.getMessage() for r in caplog.records if "invalid secret_id" in r.getMessage()]
+    assert logged, "expected the invalid-ID log line"
+    assert all("\n" not in m and "ZZZZ" not in m for m in logged)
+    assert logged[-1].endswith("Secret invalid secret_id: aa...")
