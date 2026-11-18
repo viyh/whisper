@@ -3,7 +3,7 @@ import json
 import logging
 import os
 
-from whisper import secret
+from whisper import secret, short_id
 from whisper.storage import store
 
 logger = logging.getLogger(__name__)
@@ -24,7 +24,7 @@ class local(store):
         if not s.check_id():
             return False
         secret_filename = os.path.join(self.config.path, f"{s.id}.json")
-        logger.debug(f"Reading secret from file: {secret_filename}")
+        logger.debug(f"Reading secret: {short_id(s.id)}")
         return self.secret_from_file(secret_filename)
 
     def set_secret(self, s):
@@ -35,7 +35,7 @@ class local(store):
         fd = os.open(secret_filename, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w") as secret_file:
             json.dump(s.__dict__, secret_file)
-        logger.debug(f"Saving secret: {secret_filename}")
+        logger.debug(f"Saving secret: {short_id(s.id)}")
         return True
 
     def update_secret(self, s):
@@ -50,7 +50,7 @@ class local(store):
             return False
         with os.fdopen(fd, "w") as secret_file:
             json.dump(s.__dict__, secret_file)
-        logger.debug(f"Updating secret: {secret_filename}")
+        logger.debug(f"Updating secret: {short_id(s.id)}")
         return True
 
     def delete_secret(self, secret_id):
@@ -58,7 +58,7 @@ class local(store):
         secret_filename = os.path.join(self.config.path, f"{s.id}.json")
         if not s or not s.check_id() or not os.path.exists(secret_filename):
             return True
-        logger.info(f"Deleting secret: {secret_id}")
+        logger.info(f"Deleting secret: {short_id(secret_id)}")
         os.remove(secret_filename)
         return True
 
@@ -84,7 +84,9 @@ class local(store):
             with open(secret_filename) as secret_file:
                 s.load_from_dict(json.load(secret_file))
         except (OSError, ValueError) as e:
-            logger.error(f"Could not load secret file [{secret_filename}]: {e}")
+            reason = e.strerror if isinstance(e, OSError) else e
+            secret_id = os.path.splitext(os.path.basename(secret_filename))[0]
+            logger.error(f"Could not load secret {short_id(secret_id)}: {reason}")
         if not s.check_id():
             return False
         return s

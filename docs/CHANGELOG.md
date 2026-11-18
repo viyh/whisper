@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - Unreleased
+
+### Security
+* Logs no longer contain full secret IDs. A secret ID is the random part of the share link, so anyone who could read the logs could see every live link, then try passwords against it or trip its failed-attempt lockout. Logs now show the first 8 characters (enough to correlate lines for one secret), and storage backends no longer log file paths or object keys that contain the full ID. IDs taken from the URL are also stripped of non-hex characters before logging, so they can't inject log lines.
+
+### Fixed
+* CodeQL `py/reflective-xss` alert in a test-only helper (`test_proxy.py`), which now returns JSON.
+
+### Added
+* Tests that full secret IDs never appear in logs and that URL input can't inject log lines (92 tests).
+
 ## [0.3.0] - 2026-11-17
 
 ### Changed

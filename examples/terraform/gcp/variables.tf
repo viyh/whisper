@@ -23,7 +23,7 @@ variable "name" {
 variable "image" {
   description = "Container image to run."
   type        = string
-  default     = "docker.io/viyh/whisper:0.3.0"
+  default     = "docker.io/viyh/whisper:0.3.1"
 }
 
 variable "bucket_name" {
