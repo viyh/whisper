@@ -23,7 +23,7 @@ from whisper import (
 )
 from whisper.storage import store
 
-__version__ = "0.2.2"
+__version__ = "0.3.0"
 
 app = Flask("whisper")
 
@@ -33,10 +33,14 @@ if __name__ != "__main__":
     app.logger.setLevel(gunicorn_logger.level)
 
 # load configuration file
+# (WHISPER_CONFIG, if set, holds the YAML itself and takes precedence)
 config_filename = os.environ.get("CONFIG_FILE", "config.yaml")
-config = load_config(config_filenames=[config_filename])
+config = load_config(
+    config_filenames=[config_filename],
+    config_text=os.environ.get("WHISPER_CONFIG") or None,
+)
 
-# trust X-Forwarded-For from nginx plus any configured upstream proxies
+# trust X-Forwarded-For from the configured number of upstream proxies
 app.wsgi_app = apply_proxy_fix(app.wsgi_app, config.trusted_proxy_count)
 
 # warn if secret_key looks like a default/placeholder
@@ -62,6 +66,47 @@ whisper_module._argon2_hasher = create_argon2_hasher(
 )
 
 VALID_EXPIRATIONS = {"One time use", "1 hour", "1 day", "1 week"}
+
+# Security headers, added to every response.
+#   - script-src: 'wasm-unsafe-eval' is required by argon2-browser (WASM).
+#     All third-party scripts are served from jsdelivr with SRI.
+#   - style-src: 'unsafe-inline' is required by Bootstrap 5's Tooltip
+#     component, which writes inline positioning styles at runtime via
+#     Popper. If tooltips are ever removed, drop 'unsafe-inline'.
+#   - HSTS: Whisper's threat model assumes HTTPS termination in front of this
+#     container. Browsers ignore HSTS on plain-HTTP responses, so local
+#     development over http://localhost is unaffected.
+SECURITY_HEADERS = {
+    "X-Frame-Options": "DENY",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+    "Content-Security-Policy": (
+        "default-src 'none'; "
+        "script-src 'self' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; "
+        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "img-src 'self' data: blob:; "
+        "connect-src 'self'; "
+        "font-src 'self' https://cdn.jsdelivr.net; "
+        "frame-ancestors 'none'; "
+        "base-uri 'self'; "
+        "form-action 'self';"
+    ),
+    "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",
+}
+
+
+@app.after_request
+def add_security_headers(response):
+    for name, value in SECURITY_HEADERS.items():
+        response.headers.setdefault(name, value)
+    return response
+
+
+@app.route("/elb-status", methods=["GET"])
+def health():
+    """Health check for load balancers and container platforms."""
+    return "OK", 200, {"Content-Type": "text/plain"}
 
 
 @app.route(f"{config.app_url_base}assets/<path:path>")

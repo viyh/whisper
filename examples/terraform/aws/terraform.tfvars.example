@@ -1,0 +1,3 @@
+region          = "us-east-1"
+domain_name     = "whisper.example.com"
+route53_zone_id = "Z0123456789ABCDEFGHIJ"
