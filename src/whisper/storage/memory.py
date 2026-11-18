@@ -31,6 +31,8 @@ class memory(store):
         if not s.check_id():
             return False
         with self._lock:
+            if s.id in self.secrets:  # create-only: never replace a secret
+                return False
             self.secrets[s.id] = copy.copy(s)
         logger.debug(f"Saving memory secret: {short_id(s.id)}")
         return True

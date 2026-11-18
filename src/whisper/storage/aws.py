@@ -16,8 +16,19 @@ _GONE_OR_CHANGED = frozenset(
 )
 
 
+# S3 error codes meaning "a conditional write was refused": the object
+# already exists, or a concurrent conditional write won
+_WRITE_REFUSED = frozenset(
+    {"412", "PreconditionFailed", "409", "ConditionalRequestConflict"}
+)
+
+
+def _error_code(e):
+    return str(e.response.get("Error", {}).get("Code", ""))
+
+
 def _gone_or_changed(e):
-    return str(e.response.get("Error", {}).get("Code", "")) in _GONE_OR_CHANGED
+    return _error_code(e) in _GONE_OR_CHANGED
 
 
 class s3(store):
@@ -27,10 +38,12 @@ class s3(store):
     expire dates mirrored into object tags so the cleaner can decide on expiry
     without downloading every object.
 
-    Concurrency relies on S3 conditional requests on the object's ETag: a
-    one-time claim deletes with ``IfMatch`` so exactly one caller wins (plain
-    S3 deletes are idempotent and would let every concurrent caller "win"),
-    and updates write with ``IfMatch`` so a claimed secret is never recreated.
+    Concurrency relies on S3 conditional requests: new secrets are written
+    with ``IfNoneMatch="*"`` so an existing secret is never replaced, a
+    one-time claim deletes with ``IfMatch`` on the ETag so exactly one caller
+    wins (plain S3 deletes are idempotent and would let every concurrent
+    caller "win"), and updates write with ``IfMatch`` so a claimed secret is
+    never recreated.
 
     botocore retries transient errors; other errors propagate. The cleaner
     thread logs and survives errors raised from ``delete_expired``.
@@ -98,7 +111,13 @@ class s3(store):
         if not s.check_id():
             return False
         logger.debug(f"Saving S3 secret: {short_id(s.id)}")
-        self._upload(s)
+        try:
+            # create-only: never replace an existing secret
+            self._upload(s, IfNoneMatch="*")
+        except ClientError as e:
+            if _error_code(e) in _WRITE_REFUSED:
+                return False
+            raise
         return True
 
     def update_secret(self, s):

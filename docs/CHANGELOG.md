@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-11-18
+
+**Breaking:** new secret and link format (v3). Links and secrets made by earlier versions can't be opened: old links show a notice instead, and their stored secrets are deleted when they expire.
+
+### Security
+* The link and the password are both needed to open a secret, even with a copy of the server's storage and `secret_key`. A link is now `https://<host>/#<token>`: 22 random base58 characters (about 129 bits) after the `#`, which browsers never send to servers. From the token and the password, the browser derives the secret ID (SHA-256 of the token, which the server stores the secret under) and, with Argon2id salted with the token and then HKDF, the AES-256-GCM key and an auth token. The server stores an HMAC-SHA256 of the auth token, keyed with `secret_key`, and checks it before releasing the ciphertext. In 0.3.x the key came from PBKDF2 with a salt shared by every secret on a site, so with a copy of the storage, each password guess could be tried against all secrets at once.
+* The ciphertext is bound to its secret ID (AES-GCM additional data).
+* Storage writes are create-only (S3 `If-None-Match`, GCS generation 0, local `O_EXCL`), since IDs now come from the browser: an existing secret can't be replaced.
+* After a secret is opened, its token is removed from the address bar and browser history.
+* No CDN: the page no longer loads anything from jsdelivr. The one remaining third-party library, argon2-browser 1.18.0, is served from the image (unmodified files from its npm tarball, verified against the registry's integrity hash). The CSP drops `https://cdn.jsdelivr.net` (which allowed any npm package to be loaded as script) and `'unsafe-inline'` for styles: it is now `script-src 'self' 'wasm-unsafe-eval'; style-src 'self'`.
+
+### Added
+* `max_failed_attempts`: wrong passwords allowed per secret before it locks until it expires. The default is 10, as before; 0 turns the lock off.
+
+### Changed
+* Shorter links: `https://<host>/#<22 characters>` instead of `https://<host>/<40 hex characters>`.
+* About 2.5-3x faster to create and open a secret. Click to done, median of 5 runs: creating takes 1.0-1.2 s instead of 2.9-3.3 s (Chromium 2.9 s to 1.1 s, Firefox 3.3 s to 1.0 s, WebKit/Safari 3.1 s to 1.2 s), and opening 1.0-1.2 s instead of 2.5-3.5 s. argon2-browser uses its WebAssembly SIMD build where supported (all current browsers), with the plain build as a fallback; the PBKDF2 step is gone; and the server no longer runs Argon2 (about 0.5 s and 128 MB of RAM per request), only an HMAC.
+* One page for creating and opening secrets: `index.html`, with `init.js` replacing `init-index.js` and `init-show.js` (`show.html` is gone).
+* API: `POST /` takes `id`, `auth`, `encrypted_data`, `expiration` and `version` (3), and returns 409 if the ID exists. Secrets are opened with `POST /retrieve` (`id`, `auth`) instead of `POST /<id>`.
+* README: a new architecture diagram (what each side sends and sees) and the v3 cryptographic flow.
+
+### Removed
+* `argon2-cffi` (server-side Argon2id) and the client-side PBKDF2 key derivation.
+* Bootstrap (CSS and JS) and clipboard.js. Copy buttons use the browser Clipboard API, with the older `execCommand('copy')` path as a fallback. Tooltips are plain CSS, shown on click/tap on every device and on hover/keyboard focus where the device can hover. The pages keep the same look with a small stylesheet of their own, and the same width (5/12 of the window on wider screens, now never narrower than 540px).
+* `docs/whisper_arch.png`, the original (v1) architecture diagram, replaced by the README's.
+
+### Fixed
+* The fixed footer no longer covers the end of the help text.
+* Duplicate `id` attributes on the copy-button icons; added labels for screen readers on icon buttons and fields without visible labels.
+
 ## [0.3.2] - 2026-11-17
 
 ### Security

@@ -1,20 +1,21 @@
 """Tests for the storage base class and the background cleaner."""
 
+import secrets
 import threading
 import time
 
-import pytest
-
-import whisper
-from whisper import create_argon2_hasher, secret
+from whisper import secret
 from whisper.storage import store, store_cleaner
 from whisper.storage.memory import memory
 
 
-@pytest.fixture(autouse=True)
-def _fast_argon2(monkeypatch):
-    fast = create_argon2_hasher(time_cost=1, memory_cost=8, parallelism=1)
-    monkeypatch.setattr(whisper, "_argon2_hasher", fast)
+def _make_secret(expiration="1 hour"):
+    s = secret()
+    s.create(
+        secret_id=secrets.token_hex(32), expiration=expiration, auth="a" * 64, key="k",
+        data="ciphertext",
+    )
+    return s
 
 
 def _store_with_memory_backend():
@@ -26,8 +27,7 @@ def _store_with_memory_backend():
 
 def test_get_secret_hides_expired_secret():
     st = _store_with_memory_backend()
-    s = secret()
-    s.create(expiration="1 hour", key_pass=b"pw", data="x")
+    s = _make_secret()
     s.create_date -= 7200
     s.expire_date -= 7200
     st.set_secret(s)
@@ -36,8 +36,7 @@ def test_get_secret_hides_expired_secret():
 
 def test_get_secret_returns_live_secret():
     st = _store_with_memory_backend()
-    s = secret()
-    s.create(expiration="1 hour", key_pass=b"pw", data="x")
+    s = _make_secret()
     st.set_secret(s)
     assert st.get_secret(s.id).id == s.id
 

@@ -1,23 +1,27 @@
 """Unit tests for the S3 backend, using botocore's Stubber (no network)."""
 
+import secrets
+
 import boto3
 import pytest
 from botocore.exceptions import ClientError
-from botocore.stub import Stubber
+from botocore.stub import ANY, Stubber
 
-import whisper
-from whisper import AttrDict, create_argon2_hasher, secret
+from whisper import AttrDict, secret
 from whisper.storage.aws import s3
 
 BUCKET = "test-bucket"
-SID = "a" * 40
+SID = "a" * 64
 KEY = f"secrets/{SID}.json"
 
 
-@pytest.fixture(autouse=True)
-def _fast_argon2(monkeypatch):
-    fast = create_argon2_hasher(time_cost=1, memory_cost=8, parallelism=1)
-    monkeypatch.setattr(whisper, "_argon2_hasher", fast)
+def _make_secret(expiration="1 hour"):
+    s = secret()
+    s.create(
+        secret_id=secrets.token_hex(32), expiration=expiration, auth="a" * 64, key="k",
+        data="ciphertext",
+    )
+    return s
 
 
 @pytest.fixture
@@ -31,6 +35,29 @@ def backend(monkeypatch):
         b.stub = stub
         yield b
         stub.assert_no_pending_responses()
+
+
+def test_set_secret_is_create_only(backend):
+    s = _make_secret()
+    backend.stub.add_response(
+        "put_object",
+        {},
+        {"Bucket": BUCKET, "Key": f"secrets/{s.id}.json", "Body": ANY,
+         "ContentType": "application/json", "Tagging": ANY, "IfNoneMatch": "*"},
+    )
+    assert backend.set_secret(s) is True
+
+
+@pytest.mark.parametrize("code,status", [("PreconditionFailed", 412), ("ConditionalRequestConflict", 409)])
+def test_set_secret_never_replaces_an_existing_secret(backend, code, status):
+    backend.stub.add_client_error("put_object", service_error_code=code, http_status_code=status)
+    assert backend.set_secret(_make_secret()) is False
+
+
+def test_set_secret_propagates_unexpected_errors(backend):
+    backend.stub.add_client_error("put_object", service_error_code="AccessDenied", http_status_code=403)
+    with pytest.raises(ClientError):
+        backend.set_secret(_make_secret())
 
 
 def test_claim_uses_conditional_delete(backend):
@@ -68,8 +95,7 @@ def test_update_secret_skips_missing_object(backend):
 
 
 def test_update_secret_is_conditional(backend):
-    s = secret()
-    s.create(expiration="1 hour", key_pass=b"pw", data="x")
+    s = _make_secret()
     key = f"secrets/{s.id}.json"
     backend.stub.add_response("head_object", {"ETag": '"v1"'}, {"Bucket": BUCKET, "Key": key})
     backend.stub.add_client_error(
@@ -84,8 +110,7 @@ def test_get_secret_roundtrip(backend):
 
     from botocore.response import StreamingBody
 
-    s = secret()
-    s.create(expiration="1 hour", key_pass=b"pw", data="x")
+    s = _make_secret()
     body = json.dumps(s.__dict__).encode()
     backend.stub.add_response(
         "get_object",
@@ -134,8 +159,7 @@ def test_delete_expired_falls_back_to_object_without_tags(backend):
 
     from botocore.response import StreamingBody
 
-    s = secret()
-    s.create(expiration="1 hour", key_pass=b"pw", data="x")
+    s = _make_secret()
     s.create_date -= 7200
     s.expire_date -= 7200
     key = f"secrets/{s.id}.json"

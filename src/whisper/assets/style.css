@@ -1,67 +1,444 @@
+/* Whisper styles. Self-contained (no CSS framework); the look follows
+   Bootstrap 5 defaults, which earlier versions used. No inline styles are
+   needed anywhere, so the CSP can keep style-src 'self'. */
+
+:root {
+    --text: #212529;
+    --muted: rgba(33, 37, 41, 0.75);
+    --border: #dee2e6;
+    --rule: rgba(33, 37, 41, 0.25);
+    --light: #f8f9fa;
+    --light-hover: #e9ecef;
+    --light-active: #dde0e3;
+    --primary: #0d6efd;
+    --primary-hover: #0b5ed7;
+    --primary-active: #0a58ca;
+    --focus-ring: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
+    --radius: 0.375rem;
+}
+
+*, *::before, *::after {
+    box-sizing: border-box;
+}
+
+[hidden] {
+    display: none !important;
+}
+
+html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+}
+
+body {
+    margin: 0;
+    /* room for the fixed footer, so it never covers the help text */
+    padding-bottom: 4rem;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+        "Noto Sans", "Liberation Sans", Arial, sans-serif;
+    font-size: 1rem;
+    line-height: 1.5;
+    color: var(--text);
+    background-color: #fff;
+}
+
+hr {
+    margin: 1rem 0;
+    border: 0;
+    border-top: 1px solid var(--rule);
+}
+
+a {
+    color: var(--primary);
+}
+
+/* --- Layout --- */
+
+.container {
+    width: 100%;
+    margin: 0 auto;
+    padding: 0 0.75rem;
+}
+
+/* Wider screens: 5/12 of the window, as in earlier versions, but never
+   narrower than 540px (the old layout got cramped on mid-size windows) */
+@media (min-width: 768px) {
+    .container {
+        width: max(540px, 41.6667%);
+    }
+}
+
 .page-header {
-    padding-top: 30px;
-    padding-bottom: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    padding: 30px 0 10px;
 }
 
-.vcenter {
-    padding-top: 10px;
+.page-header img {
+    display: block;
+}
+
+.page-header h1 {
+    margin: 0;
+    font-size: calc(1.325rem + 0.9vw);
+    font-weight: 500;
+    line-height: 1.2;
+}
+
+@media (min-width: 1200px) {
+    .page-header h1 {
+        font-size: 2rem;
+    }
+}
+
+.field {
+    margin-bottom: 1rem;
+}
+
+.footer {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.5rem 0.875rem;
+    padding-bottom: calc(0.5rem + env(safe-area-inset-bottom, 0px));
+    background-color: var(--light);
+}
+
+/* --- Forms --- */
+
+.form-label {
     display: inline-block;
-    vertical-align: middle;
-    float: none;
+    margin-bottom: 0.5rem;
+    font-weight: 600;
 }
 
-.inputbtn {
-    width: 44px;
-    height: 40px;
-    padding: 8px;
-    border: 1px solid #d5d5d5;
-    border-radius: 3px;
-    line-height: 0;
+.form-text {
+    margin-top: 0.25rem;
+    padding-left: 5px;
+    font-size: 0.875em;
+    color: var(--muted);
 }
 
-.inputbtn:hover, .inputbtn:focus, .inputbtn:active, .open>.dropdown-toggle.inputbtn {
-    border: 1px solid #d5d5d5;
-    border-radius: 3px;
+.form-control,
+.form-select {
+    display: block;
+    width: 100%;
+    margin: 0;
+    padding: 0.375rem 0.75rem;
+    font: inherit;
+    line-height: 1.5;
+    color: var(--text);
+    background-color: #fff;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
 }
 
-.inputbtn:active {
-    background-color: #ddd;
+.form-control:focus,
+.form-select:focus {
+    border-color: #86b7fe;
+    outline: 0;
+    box-shadow: var(--focus-ring);
 }
 
-.clippy {
-    padding-left: 2px;
+.form-control:disabled {
+    background-color: var(--light-hover);
 }
 
-.btnimg {
-    width: 20px;
+textarea.form-control {
+    resize: vertical;
 }
 
-.output-group {
-    position: relative;
+.form-select {
+    padding-right: 2.25rem;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%23343a40' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3e%3c/svg%3e");
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+    background-size: 16px 12px;
 }
 
-.output-group-button {
-    position: absolute;
-    right: 1px;
-    top: 1px;
+/* File input: style the browser's own button to sit flush inside the field */
+input[type="file"].form-control {
+    overflow: hidden;
+}
+
+input[type="file"].form-control::file-selector-button {
+    margin: -0.375rem 0.75rem -0.375rem -0.75rem;
+    padding: 0.375rem 0.75rem;
+    font: inherit;
+    color: var(--text);
+    background-color: var(--light);
+    border: 0;
+    border-right: 1px solid var(--border);
+    border-radius: 0;
+    cursor: pointer;
+}
+
+input[type="file"].form-control::-webkit-file-upload-button {
+    margin: -0.375rem 0.75rem -0.375rem -0.75rem;
+    padding: 0.375rem 0.75rem;
+    font: inherit;
+    color: var(--text);
+    background-color: var(--light);
+    border: 0;
+    border-right: 1px solid var(--border);
+    border-radius: 0;
+    cursor: pointer;
+}
+
+input[type="file"].form-control:hover::file-selector-button {
+    background-color: var(--light-hover);
 }
 
 #secret_text {
     height: 120px;
 }
 
-.form-text {
-    padding-left: 5px;
-}
-
-.form-label {
-    font-weight:600;
-}
-
 #secret_file {
     margin-top: 8px;
 }
 
+/* --- Buttons --- */
+
+.btn {
+    display: inline-block;
+    padding: 0.375rem 0.75rem;
+    font: inherit;
+    line-height: 1.5;
+    text-align: center;
+    border: 1px solid transparent;
+    border-radius: var(--radius);
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    transition: background-color 0.15s ease-in-out, border-color 0.15s ease-in-out,
+        box-shadow 0.15s ease-in-out;
+}
+
+.btn:focus-visible {
+    outline: 0;
+    box-shadow: var(--focus-ring);
+}
+
+.btn:disabled {
+    opacity: 0.65;
+    cursor: default;
+}
+
+.btn-primary {
+    color: #fff;
+    background-color: var(--primary);
+    border-color: var(--primary);
+}
+
+.btn-primary:hover {
+    background-color: var(--primary-hover);
+    border-color: var(--primary-hover);
+}
+
+.btn-primary:active {
+    background-color: var(--primary-active);
+    border-color: var(--primary-active);
+}
+
+.btn-primary:disabled {
+    background-color: var(--primary);
+    border-color: var(--primary);
+}
+
+.btn-block {
+    display: block;
+    width: 100%;
+}
+
+/* Square icon buttons next to inputs */
+.inputbtn {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 40px;
+    padding: 8px;
+    color: var(--text);
+    background-color: var(--light);
+    border: 1px solid #d5d5d5;
+    border-radius: 3px;
+    line-height: 0;
+}
+
+.inputbtn:hover {
+    background-color: var(--light-hover);
+}
+
+.inputbtn:active {
+    background-color: #ddd;
+}
+
+.btnimg {
+    width: 20px;
+}
+
+.clippy {
+    padding-left: 2px;
+}
+
+/* --- Input groups: a field with buttons joined to its right edge --- */
+
+.input-group {
+    display: flex;
+    align-items: stretch;
+    width: 100%;
+}
+
+.input-group > .form-control {
+    flex: 1 1 auto;
+    width: 1%;
+    min-width: 0;
+}
+
+.input-group > :not(:first-child) {
+    margin-left: -1px;
+}
+
+.input-group > :not(:last-child) {
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+}
+
+.input-group > :not(:first-child) {
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+}
+
+.input-group > .inputbtn {
+    height: auto;
+    min-height: 40px;
+}
+
+/* keep the focused field's ring above its neighbours */
+.input-group > :focus,
+.input-group > :focus-visible {
+    position: relative;
+    z-index: 3;
+}
+
 .link-group {
     margin-top: 8px;
+    margin-bottom: 1rem;
+}
+
+/* Retrieved secret: copy button floats in the textarea's top-right corner */
+.output-group {
+    position: relative;
+}
+
+.output-group-button {
+    position: absolute;
+    top: 1px;
+    right: 1px;
+}
+
+/* --- Tooltips ---
+   Text comes from the data-tip attribute. "tip-show" (added by whisper.js on
+   click/tap) works on every device; "tip-hover" also shows it on mouse hover
+   and keyboard focus, only where the device can hover, so touch screens don't
+   get a stuck tooltip after a tap. */
+
+.tip {
+    position: relative;
+}
+
+.tip::after,
+.tip::before {
+    position: absolute;
+    left: 50%;
+    z-index: 10;
+    visibility: hidden;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s linear, visibility 0.15s linear;
+}
+
+.tip::after {
+    content: attr(data-tip);
+    top: calc(100% + 6px);
+    transform: translateX(-50%);
+    padding: 0.25rem 0.5rem;
+    font-size: 0.875rem;
+    font-weight: 400;
+    line-height: 1.5;
+    white-space: nowrap;
+    color: #fff;
+    background-color: #000;
+    border-radius: var(--radius);
+}
+
+/* arrow */
+.tip::before {
+    content: "";
+    top: calc(100% + 1px);
+    transform: translateX(-50%);
+    border: 5px solid transparent;
+    border-top-width: 0;
+    border-bottom-color: #000;
+}
+
+/* for buttons at the right edge: align the bubble's right edge to the button */
+.tip-end::after {
+    right: 0;
+    left: auto;
+    transform: none;
+}
+
+.tip.tip-show::after,
+.tip.tip-show::before {
+    visibility: visible;
+    opacity: 1;
+}
+
+@media (hover: hover) {
+    .tip-hover:hover::after,
+    .tip-hover:hover::before {
+        visibility: visible;
+        opacity: 1;
+    }
+}
+
+.tip-hover:focus-visible::after,
+.tip-hover:focus-visible::before {
+    visibility: visible;
+    opacity: 1;
+}
+
+/* Off-screen textarea used by the copy fallback for older browsers */
+.clip-helper {
+    position: fixed;
+    top: 0;
+    left: -9999px;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    font-size: 12pt;
+    border: 0;
+    opacity: 0;
+}
+
+/* Shown on the page an old (pre-0.4.0) link redirects to */
+.notice {
+    margin: 0 0 1rem;
+    padding: 0.75rem 1rem;
+    color: #664d03;
+    background-color: #fff3cd;
+    border: 1px solid #ffe69c;
+    border-radius: var(--radius);
 }

@@ -14,7 +14,7 @@ pip install -r src/requirements.txt -r src/requirements-dev.txt
 
 # Copy the default config
 cp src/config.default.yaml src/config.yaml
-# Edit src/config.yaml — at minimum, set a random secret_key (32+ chars)
+# Edit src/config.yaml - at minimum, set a random secret_key (32+ chars)
 ```
 
 ## Running Locally
@@ -47,7 +47,7 @@ ruff check src/
 
 - Branch from the latest `release/*` or `master` branch.
 - CI must pass (lint, tests, Docker build).
-- Keep commits focused — one logical change per PR.
+- Keep commits focused - one logical change per PR.
 - Write a clear PR description explaining *what* and *why*.
 
 ## Security Issues

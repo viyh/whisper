@@ -23,7 +23,7 @@ variable "name" {
 variable "image" {
   description = "Container image to run."
   type        = string
-  default     = "docker.io/viyh/whisper:0.3.2"
+  default     = "docker.io/viyh/whisper:0.4.0"
 }
 
 variable "bucket_name" {
@@ -39,7 +39,7 @@ variable "max_instances" {
 }
 
 variable "memory" {
-  description = "Memory per instance. Each concurrent password hash uses 128 MB; 512Mi fits the default 2 threads."
+  description = "Memory per instance. The password hashing runs in the browser, so 512Mi leaves plenty of room."
   type        = string
   default     = "512Mi"
 }

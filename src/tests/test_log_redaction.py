@@ -68,20 +68,22 @@ def test_filter_survives_bad_format_args():
 
 def test_flask_exception_log_is_redacted(client, app_module, captured, monkeypatch):
     stream = captured(app_module.app.logger.name)
-    sid = client.post(
+    sid, auth = "e" * 64, "f" * 64
+    client.post(
         "/",
-        json={"expiration": "One time use", "password": "pw", "encrypted_data": "x", "version": 2},
-    ).get_json()["id"]
+        json={"id": sid, "auth": auth, "expiration": "One time use",
+              "encrypted_data": "x", "version": 3},
+    )
 
     def boom(secret_id):
         raise RuntimeError(f"backend failed on secrets/{secret_id}.json")
 
     monkeypatch.setattr(app_module.store, "claim_secret", boom)
     monkeypatch.setitem(app_module.app.config, "PROPAGATE_EXCEPTIONS", False)
-    r = client.post(f"/{sid}", json={"password": "pw"})
+    r = client.post("/retrieve", json={"id": sid, "auth": auth})
     assert r.status_code == 500
     out = stream.getvalue()
-    assert "Exception on /" in out and "RuntimeError" in out
+    assert "Exception on /retrieve" in out and "RuntimeError" in out
     assert sid not in out
     assert sid[:8] + "..." in out
 

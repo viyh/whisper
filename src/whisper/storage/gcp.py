@@ -18,9 +18,11 @@ class gcs(store):
     expire dates mirrored into custom object metadata so the cleaner can decide
     on expiry from a bucket listing without downloading every object.
 
-    Concurrency relies on GCS object generations: a one-time claim deletes with
-    ``if_generation_match`` so exactly one caller wins, and updates write with
-    ``if_generation_match`` so a claimed secret is never recreated.
+    Concurrency relies on GCS object generations: new secrets are written with
+    ``if_generation_match=0`` so an existing secret is never replaced, a
+    one-time claim deletes with ``if_generation_match`` so exactly one caller
+    wins, and updates write with ``if_generation_match`` so a claimed secret
+    is never recreated.
 
     The client library retries reads, deletes and generation-conditioned writes
     on transient errors; other errors propagate. The cleaner thread logs and
@@ -84,7 +86,11 @@ class gcs(store):
         if not s.check_id():
             return False
         logger.debug(f"Saving GCS secret: {short_id(s.id)}")
-        self._upload(s)
+        try:
+            # generation 0 = "no live object": never replace an existing secret
+            self._upload(s, if_generation_match=0)
+        except PreconditionFailed:
+            return False
         return True
 
     def update_secret(self, s):

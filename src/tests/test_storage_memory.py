@@ -4,19 +4,13 @@ The memory backend is the reference implementation; the S3/GCS/local
 backends implement the same contract. These tests lock down the contract
 itself."""
 
+import secrets
 import time
 
 import pytest
 
-import whisper
-from whisper import create_argon2_hasher, secret
+from whisper import secret
 from whisper.storage.memory import memory
-
-
-@pytest.fixture(autouse=True)
-def _fast_argon2(monkeypatch):
-    fast = create_argon2_hasher(time_cost=1, memory_cost=8, parallelism=1)
-    monkeypatch.setattr(whisper, "_argon2_hasher", fast)
 
 
 @pytest.fixture
@@ -28,7 +22,10 @@ def backend():
 
 def _make_secret(expiration="1 hour"):
     s = secret()
-    s.create(expiration=expiration, key_pass=b"pw", data="ciphertext")
+    s.create(
+        secret_id=secrets.token_hex(32), expiration=expiration, auth="a" * 64, key="k",
+        data="ciphertext",
+    )
     return s
 
 
@@ -51,6 +48,15 @@ def test_set_secret_rejects_invalid_id(backend):
     assert backend.set_secret(s) is False
 
 
+def test_set_secret_never_replaces_an_existing_secret(backend):
+    s = _make_secret()
+    assert backend.set_secret(s) is True
+    other = _make_secret()
+    other.id, other.data = s.id, "attacker-data"
+    assert backend.set_secret(other) is False
+    assert backend.get_secret(s.id).data == "ciphertext"
+
+
 def test_delete_secret(backend):
     s = _make_secret()
     backend.set_secret(s)
@@ -65,7 +71,7 @@ def test_claim_secret_is_atomic(backend):
     backend.set_secret(s)
 
     assert backend.claim_secret(s.id) is True
-    # Second attempt — the secret is gone.
+    # Second attempt - the secret is gone.
     assert backend.claim_secret(s.id) is False
     # And a regular get should also fail.
     assert backend.get_secret(s.id) is False
@@ -97,6 +103,6 @@ def test_delete_expired_leaves_one_time_within_grace_window(backend):
     assert backend.get_secret(ot.id).id == ot.id
 
     ot.create_date = int(time.time()) - 86400 * 31
-    backend.set_secret(ot)  # backend stores copies, so persist the change
+    backend.update_secret(ot)  # backend stores copies, so persist the change
     backend.delete_expired()
     assert backend.get_secret(ot.id) is False

@@ -2,7 +2,7 @@ version: '3'
 
 services:
   whisper:
-    image: viyh/whisper:0.3.2
+    image: viyh/whisper:0.4.0
     container_name: whisper
     restart: always
     environment:

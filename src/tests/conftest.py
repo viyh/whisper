@@ -46,15 +46,15 @@ def test_config_path(tmp_path_factory):
 def app_module(test_config_path):
     """Import ``app`` with the test config active.
 
-    Session-scoped so the module-level storage backend and Argon2 hasher are
-    built exactly once across the run.
+    Session-scoped so the module-level storage backend is built exactly once
+    across the run.
     """
     os.environ["CONFIG_FILE"] = test_config_path
     # import after env setup is deliberate
     import app as app_module
 
     # Disable rate limiting for tests. The per-secret failed-attempt lockout
-    # in show_secret is still exercised — we just don't want to trip
+    # in retrieve_secret is still exercised - we just don't want to trip
     # flask-limiter's in-memory 10/min cap while testing that logic.
     app_module.limiter.enabled = False
     return app_module

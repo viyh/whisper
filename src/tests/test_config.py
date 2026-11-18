@@ -6,6 +6,7 @@ from whisper import (
     ConfigError,
     ConfigMissingError,
     ConfigUnknownError,
+    check_max_failed_attempts,
     load_config,
 )
 
@@ -39,7 +40,7 @@ def test_load_valid_config(tmp_path):
 
 
 def test_missing_required_key_raises(tmp_path):
-    # Drop secret_key — load_config should refuse.
+    # Drop secret_key - load_config should refuse.
     missing = VALID_CONFIG.replace(
         'secret_key: "abcdefghijklmnopqrstuvwxyz_0123456"\n', ""
     )
@@ -110,3 +111,20 @@ def test_redact_secret_ids():
     assert redact_secret_ids(f"/s{sid}") == "/s01234567..."
     assert sid.upper() not in redact_secret_ids(f"/{sid.upper()}")
     assert sid not in redact_secret_ids(f"https://w.example%2F{sid}")
+
+
+def test_max_failed_attempts_defaults_to_10(tmp_path):
+    cfg = load_config(config_filenames=[_write(tmp_path, VALID_CONFIG)])
+    assert cfg.max_failed_attempts == 10
+
+
+def test_max_failed_attempts_can_be_set_or_turned_off(tmp_path):
+    for value in (0, 3):
+        cfg = load_config(config_text=VALID_CONFIG + f"max_failed_attempts: {value}\n")
+        assert check_max_failed_attempts(cfg.max_failed_attempts) == value
+
+
+@pytest.mark.parametrize("bad", [-1, "10", 2.5, True, None])
+def test_max_failed_attempts_rejects_invalid_values(bad):
+    with pytest.raises(ConfigError):
+        check_max_failed_attempts(bad)
