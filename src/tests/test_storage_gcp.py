@@ -1,20 +1,14 @@
 """Unit tests for the GCS backend against a fake bucket (no network)."""
 
 import json
+import secrets
 from unittest import mock
 
 import pytest
 from google.api_core.exceptions import NotFound, PreconditionFailed
 
-import whisper
-from whisper import AttrDict, create_argon2_hasher, secret
+from whisper import AttrDict, secret
 from whisper.storage.gcp import gcs
-
-
-@pytest.fixture(autouse=True)
-def _fast_argon2(monkeypatch):
-    fast = create_argon2_hasher(time_cost=1, memory_cost=8, parallelism=1)
-    monkeypatch.setattr(whisper, "_argon2_hasher", fast)
 
 
 @pytest.fixture
@@ -28,7 +22,10 @@ def backend():
 
 def _make_secret(expiration="1 hour"):
     s = secret()
-    s.create(expiration=expiration, key_pass=b"pw", data="ciphertext")
+    s.create(
+        secret_id=secrets.token_hex(32), expiration=expiration, auth="a" * 64, key="k",
+        data="ciphertext",
+    )
     return s
 
 
@@ -59,7 +56,13 @@ def test_set_secret_sends_metadata_with_upload(backend):
     assert backend.set_secret(s) is True
     assert blob.metadata == {"create_date": str(s.create_date), "expire_date": str(s.expire_date)}
     blob.upload_from_string.assert_called_once()
+    assert blob.upload_from_string.call_args.kwargs["if_generation_match"] == 0
     blob.patch.assert_not_called()
+
+
+def test_set_secret_never_replaces_an_existing_secret(backend):
+    backend.bucket.blob.return_value.upload_from_string.side_effect = PreconditionFailed("exists")
+    assert backend.set_secret(_make_secret()) is False
 
 
 def test_claim_secret_generation_match(backend):

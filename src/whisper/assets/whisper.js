@@ -1,14 +1,64 @@
 // Whisper - Secure secret sharing
-// Argon2id password hashing + AES-256-GCM via Web Crypto API.
-// Stored-secret format is version-tagged so a future v3 can ship without
-// breaking already-stored v2 data; currently only version 2 is supported.
+//
+// Secret format v3. A share link is <base>#<token>: a random 22-character
+// base58 token after the "#", which browsers never send to the server. From
+// the token and the password, the browser derives:
+//   - the secret ID: SHA-256 of the token. The server stores the secret
+//     under it, so the server, its storage and its logs never see the token.
+//   - Argon2id(password, salt = token), split with HKDF into:
+//       - an AES-256-GCM key that encrypts the secret, and
+//       - an auth token the server checks before returning the ciphertext.
+// So opening a secret needs both the full link and the password, even for
+// someone holding a copy of the server's storage and secret_key.
 
-const WHISPER_VERSION = 2;
+const WHISPER_VERSION = 3;
+
+// base58: alphanumeric without the look-alikes 0, O, I and l, so links
+// survive chat apps and Markdown, and can be read out or retyped.
+// 22 characters = 128.9 random bits.
+const TOKEN_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+const TOKEN_LENGTH = 22;
+const TOKEN_PATTERN = /^[1-9A-HJ-NP-Za-km-z]{22}/;
+
+const ARGON2_HASH_LEN = 32;
+
+// argon2-browser loads its WASM on first use. Use the SIMD build where the
+// browser supports WebAssembly SIMD (all current browsers; roughly 1.3-2x
+// faster), and the plain build otherwise. Both produce identical hashes.
+// Files are found next to the argon2-browser script tag, so this works under
+// any app_url_base.
+var WASM_SIMD_PROBE = new Uint8Array([
+    0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0, 10, 10, 1,
+    8, 0, 65, 0, 253, 15, 253, 98, 11
+]);
+
+function wasm_simd_supported() {
+    try {
+        return typeof WebAssembly === 'object' && WebAssembly.validate(WASM_SIMD_PROBE);
+    } catch (e) {
+        return false;
+    }
+}
+
+(function configure_argon2() {
+    var lib = document.querySelector('script[src*="argon2-browser"]');
+    if (!lib) return;
+    var dir = lib.src.replace(/lib\/argon2\.js(\?.*)?$/, 'dist/');
+    window.whisperArgon2Build = wasm_simd_supported() ? 'simd' : 'plain';
+    window.argon2WasmPath = dir + (window.whisperArgon2Build === 'simd' ? 'argon2-simd.wasm' : 'argon2.wasm');
+    window.loadArgon2WasmModule = function() {
+        return new Promise(function(resolve, reject) {
+            var s = document.createElement('script');
+            s.src = dir + 'argon2.js';
+            s.onload = function() { resolve(window.Module); };
+            s.onerror = reject;
+            document.head.appendChild(s);
+        });
+    };
+})();
 
 // Argon2id parameters - read from server config via data attributes
 // Falls back to defaults if not present in DOM
-const ARGON2_HASH_LEN = 32;
-
 function get_argon2_params() {
     var el = document.getElementById('app-config');
     return {
@@ -19,60 +69,79 @@ function get_argon2_params() {
 }
 
 // --- Clipboard ---
+// Native async Clipboard API where available (all current browsers, on HTTPS
+// or localhost), falling back to the older execCommand('copy') path that
+// clipboard.js used, for older browsers and embedded webviews.
+
+async function copy_text(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+        try {
+            await navigator.clipboard.writeText(text);
+            return true;
+        } catch (e) {
+            // e.g. permission denied or no user gesture: try the fallback
+        }
+    }
+    return copy_text_fallback(text);
+}
+
+function copy_text_fallback(text) {
+    var active = document.activeElement;
+    var helper = document.createElement('textarea');
+    helper.className = 'clip-helper';
+    helper.setAttribute('readonly', '');
+    helper.value = text;
+    document.body.appendChild(helper);
+    helper.select();
+    helper.setSelectionRange(0, text.length); // iOS Safari
+    var ok = false;
+    try {
+        ok = document.execCommand('copy');
+    } catch (e) {
+        ok = false;
+    }
+    document.body.removeChild(helper);
+    if (active && active.focus) active.focus();
+    return ok;
+}
 
 function init_clipboard() {
-    var clipboard = new ClipboardJS('.clipbtn', {
-        text: function(trigger) {
-            var target = document.querySelector(trigger.dataset.clipboardTarget);
-            return target ? target.value : '';
-        }
-    });
-    clipboard.on('success', function(e) {
-        var btn = e.trigger;
-        setTooltip(btn, 'Copied');
-        hideTooltip(btn);
-    });
-    clipboard.on('error', function(e) {
-        var btn = e.trigger;
-        setTooltip(btn, 'Failed!');
-        hideTooltip(btn);
+    document.querySelectorAll('.clipbtn').forEach(function(btn) {
+        btn.addEventListener('click', async function(e) {
+            var target = document.querySelector(btn.dataset.clipboardTarget);
+            var ok = target ? await copy_text(target.value) : false;
+            if (ok) {
+                show_tip(btn, 'Copied!');
+            } else {
+                // an automatic copy (after creating/retrieving) can be refused
+                // by the browser without a direct click; ask for one
+                show_tip(btn, e.isTrusted ? 'Copy failed' : 'Click to copy');
+            }
+        });
     });
 }
 
-// --- Tooltips (Bootstrap 5 native) ---
+// --- Tooltips ---
+// The bubble is pure CSS (see .tip in style.css); this only sets its text and
+// shows it briefly. Works the same for mouse, touch and keyboard.
 
-function init_tooltip() {
-    document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(function(el) {
-        new bootstrap.Tooltip(el, { trigger: 'manual' });
-    });
-    var regenBtn = document.getElementById('regenbutton');
-    if (regenBtn) {
-        new bootstrap.Tooltip(regenBtn, { trigger: 'hover', placement: 'right' });
-    }
-}
-
-function setTooltip(el, message) {
-    var tooltip = bootstrap.Tooltip.getInstance(el);
-    if (tooltip) {
-        tooltip.hide();
-        el.setAttribute('data-bs-original-title', message);
-        tooltip.show();
-    }
-}
-
-function hideTooltip(el) {
-    setTimeout(function() {
-        var tooltip = bootstrap.Tooltip.getInstance(el);
-        if (tooltip) tooltip.hide();
-    }, 1500);
+function show_tip(el, message, ms) {
+    if (!el.dataset.tipDefault && el.dataset.tip) el.dataset.tipDefault = el.dataset.tip;
+    el.dataset.tip = message;
+    el.classList.add('tip-show');
+    clearTimeout(el.tipTimer);
+    el.tipTimer = setTimeout(function() {
+        el.classList.remove('tip-show');
+        if (el.dataset.tipDefault) el.dataset.tip = el.dataset.tipDefault;
+    }, ms || 1500);
 }
 
 // --- Password visibility toggle ---
 
-function toggle_password_visibility() {
-    var pw = document.getElementById('password');
-    var eyeIcon = document.getElementById('eye-icon');
-    var eyeSlashIcon = document.getElementById('eye-slash-icon');
+function toggle_password_visibility(button) {
+    var pw = document.querySelector(button.dataset.target);
+    var eyeIcon = button.querySelector('.bi-eye');
+    var eyeSlashIcon = button.querySelector('.bi-eye-slash');
     // Toggle via the `hidden` attribute rather than inline style writes so
     // the page stays compatible with a strict `style-src` CSP.
     if (pw.type === 'password') {
@@ -128,39 +197,58 @@ async function get_base64(file_input) {
     return 'filename:' + file.name + ',' + result_base64;
 }
 
-// --- V2 Crypto: Argon2id + AES-256-GCM via Web Crypto API ---
+// --- Link token ---
 
-async function pw_hash_v2(password) {
+function new_token() {
+    return random_pw(TOKEN_LENGTH, TOKEN_ALPHABET);
+}
+
+// The token from the current URL, or null if there isn't a complete one.
+// Anything after the 22 characters (e.g. punctuation a chat app glued onto
+// the link) is ignored.
+function link_token() {
+    var match = location.hash.slice(1).match(TOKEN_PATTERN);
+    return match ? match[0] : null;
+}
+
+// The page's base path, e.g. "/" or "/whisper/"
+function base_path() {
+    return location.pathname.replace(/[^/]*$/, '');
+}
+
+// --- Crypto (v3): Argon2id + HKDF + AES-256-GCM, see the top of this file ---
+
+function to_hex(buffer) {
+    return Array.from(new Uint8Array(buffer), function(b) {
+        return b.toString(16).padStart(2, '0');
+    }).join('');
+}
+
+async function derive_keys(password, token) {
+    var enc = new TextEncoder();
+    // Web Crypto runs off the main thread, so this overlaps with Argon2
+    var id = crypto.subtle.digest('SHA-256', enc.encode('whisper v3 id:' + token));
     var params = get_argon2_params();
     var result = await argon2.hash({
         pass: password,
-        salt: window.location.origin.repeat(2),
+        salt: token,
         time: params.time,
         mem: params.mem,
         parallelism: params.par,
         hashLen: ARGON2_HASH_LEN,
         type: argon2.ArgonType.Argon2id
     });
-    return result.encoded;
-}
-
-async function derive_key_v2(password) {
-    var encoder = new TextEncoder();
-    var keyMaterial = await crypto.subtle.importKey(
-        'raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits', 'deriveKey']
+    var master = await crypto.subtle.importKey(
+        'raw', result.hash, 'HKDF', false, ['deriveBits', 'deriveKey']
     );
-    return await crypto.subtle.deriveKey(
-        {
-            name: 'PBKDF2',
-            salt: encoder.encode(window.location.origin),
-            iterations: 600000,
-            hash: 'SHA-256'
-        },
-        keyMaterial,
-        { name: 'AES-GCM', length: 256 },
-        false,
-        ['encrypt', 'decrypt']
+    function hkdf(info) {
+        return { name: 'HKDF', hash: 'SHA-256', salt: enc.encode('whisper v3'), info: enc.encode(info) };
+    }
+    var auth = await crypto.subtle.deriveBits(hkdf('auth'), master, 256);
+    var key = await crypto.subtle.deriveKey(
+        hkdf('encryption'), master, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']
     );
+    return { id: to_hex(await id), auth: to_hex(auth), key: key };
 }
 
 function uint8_to_base64(bytes) {
@@ -181,14 +269,15 @@ function base64_to_uint8(b64) {
     return bytes;
 }
 
-async function encrypt_v2(plaintext, password) {
-    var key = await derive_key_v2(password);
+// The ciphertext is bound to its ID (AES-GCM additional data), so it can't be
+// passed off as a different secret.
+async function encrypt_secret(plaintext, keys) {
+    var enc = new TextEncoder();
     var iv = crypto.getRandomValues(new Uint8Array(12));
-    var plaintextBytes = new TextEncoder().encode(plaintext);
     var ciphertext = await crypto.subtle.encrypt(
-        { name: 'AES-GCM', iv: iv },
-        key,
-        plaintextBytes
+        { name: 'AES-GCM', iv: iv, additionalData: enc.encode(keys.id) },
+        keys.key,
+        enc.encode(plaintext)
     );
     // Prepend IV to ciphertext, encode as base64
     var combined = new Uint8Array(iv.length + ciphertext.byteLength);
@@ -197,24 +286,21 @@ async function encrypt_v2(plaintext, password) {
     return uint8_to_base64(combined);
 }
 
-async function decrypt_v2(ciphertext_b64, password) {
-    var key = await derive_key_v2(password);
+async function decrypt_secret(ciphertext_b64, keys) {
     var combined = base64_to_uint8(ciphertext_b64);
-    var iv = combined.slice(0, 12);
-    var ciphertext = combined.slice(12);
     var plaintext = await crypto.subtle.decrypt(
-        { name: 'AES-GCM', iv: iv },
-        key,
-        ciphertext
+        { name: 'AES-GCM', iv: combined.slice(0, 12), additionalData: new TextEncoder().encode(keys.id) },
+        keys.key,
+        combined.slice(12)
     );
     return new TextDecoder().decode(plaintext);
 }
 
 // --- API call (vanilla fetch) ---
 
-async function api_call(method, data) {
-    var response = await fetch(window.location.href, {
-        method: method,
+async function api_post(path, data) {
+    var response = await fetch(base_path() + path, {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json; charset=utf-8' },
         body: JSON.stringify(data)
     });
@@ -222,29 +308,6 @@ async function api_call(method, data) {
 }
 
 // --- Create secret flow ---
-
-async function send_new_link_data(encrypted, password, expiration) {
-    var hashed = await pw_hash_v2(password);
-    var api_data = {
-        encrypted_data: encrypted,
-        password: hashed,
-        expiration: expiration,
-        version: WHISPER_VERSION
-    };
-    document.getElementById('secret_link').value = 'Uploading data and generating link...';
-    try {
-        var response = await api_call('POST', api_data);
-        if (response.id) {
-            var secret_link = document.getElementById('secret_link');
-            secret_link.value = location.origin + location.pathname + response.id;
-            document.getElementById('copybutton').click();
-        } else {
-            document.getElementById('secret_link').value = response.result || 'Could not create link.';
-        }
-    } catch (e) {
-        document.getElementById('secret_link').value = 'Could not create link.';
-    }
-}
 
 async function new_link(event) {
     event.preventDefault();
@@ -261,15 +324,33 @@ async function new_link(event) {
 
     secret_link.value = 'Encrypting, please wait...';
 
-    var plaintext;
-    if (secret_file && secret_file.value != '') {
-        plaintext = await get_base64(secret_file);
-    } else {
-        plaintext = secret_text;
+    try {
+        var plaintext;
+        if (secret_file && secret_file.value != '') {
+            plaintext = await get_base64(secret_file);
+        } else {
+            plaintext = secret_text;
+        }
+        var token = new_token();
+        var keys = await derive_keys(password, token);
+        var encrypted = await encrypt_secret(plaintext, keys);
+        secret_link.value = 'Uploading data and generating link...';
+        var response = await api_post('', {
+            id: keys.id,
+            auth: keys.auth,
+            encrypted_data: encrypted,
+            expiration: expiration,
+            version: WHISPER_VERSION
+        });
+        if (response.id === keys.id) {
+            secret_link.value = location.origin + base_path() + '#' + token;
+            document.getElementById('copybutton').click();
+        } else {
+            secret_link.value = response.result || 'Could not create link.';
+        }
+    } catch (e) {
+        secret_link.value = 'Could not create link.';
     }
-
-    var encrypted = await encrypt_v2(plaintext, password);
-    await send_new_link_data(encrypted, password, expiration);
 }
 
 // --- Retrieve secret flow ---
@@ -292,47 +373,42 @@ function download_secret_file(decrypted, file_name, file_mime) {
     file_dl.click();
 }
 
-function display_secret_text(decrypted) {
-    document.getElementById('decrypted_text').value = decrypted;
-}
-
 async function get_data(event) {
     event.preventDefault();
-    var password = document.getElementById('password').value;
+    var token = link_token();
+    var password = document.getElementById('retrieve_password').value;
     var decrypted_text = document.getElementById('decrypted_text');
-    decrypted_text.value = 'Downloading secret...';
+    decrypted_text.value = 'Decrypting, please wait...';
 
     try {
-        var hashed = await pw_hash_v2(password);
-        var response = await api_call('POST', { password: hashed });
+        var keys = await derive_keys(password, token);
+        var response = await api_post('retrieve', { id: keys.id, auth: keys.auth });
 
         if (!response.encrypted_data) {
             decrypted_text.value = response.result || 'Error retrieving secret.';
             return;
         }
-
-        // Only version 2 is supported. Anything else indicates data written by
-        // an incompatible build (e.g. a pre-0.2.0 v1 secret being read by a
-        // post-v1-removal client). Surface an error rather than silently
-        // falling through.
-        if ((response.version || 0) !== WHISPER_VERSION) {
-            decrypted_text.value = 'Unsupported secret format (version ' +
-                response.version + '). Use the release/0.1.0_to_0.2.0 branch ' +
-                'to decrypt legacy v1 secrets.';
+        if (response.version !== WHISPER_VERSION) {
+            decrypted_text.value = 'Unsupported secret format (version ' + response.version + ').';
             return;
         }
 
-        var decrypted = await decrypt_v2(response.encrypted_data, password);
+        var decrypted = await decrypt_secret(response.encrypted_data, keys);
+
+        // the link has done its job: take the token out of the address bar
+        // and browser history
+        history.replaceState(null, '', location.pathname + location.search);
 
         var regex = /^filename:(.+?),data:(\w+\/[-+.\w]+);base64,/;
         var match = decrypted.substring(0, 100).match(regex);
         if (match) {
             download_secret_file(decrypted.replace(regex, ''), match[1], match[2]);
+            decrypted_text.value = 'Downloaded ' + match[1] + '.';
         } else {
-            display_secret_text(decrypted);
-            document.getElementById('copybutton').click();
+            decrypted_text.value = decrypted;
+            document.getElementById('retrieve_copybutton').click();
         }
     } catch (e) {
-        decrypted_text.value = 'Error decrypting secret. Wrong password?';
+        decrypted_text.value = 'Error decrypting secret.';
     }
 }
