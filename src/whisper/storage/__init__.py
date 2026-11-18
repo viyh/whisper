@@ -2,7 +2,7 @@ import logging
 import threading
 import time
 
-from whisper import check_config, class_loader, secret
+from whisper import check_config, class_loader, secret, short_id
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +64,7 @@ class store:
         if not isinstance(s, secret) or not s.check_id():
             return False
         if s.is_expired():
-            logger.info(f"Secret expired: {s.id}")
+            logger.info(f"Secret expired: {short_id(s.id)}")
             return False
         return s
 
@@ -80,7 +80,7 @@ class store:
 
     def delete_secret(self, secret_id):
         """Delete a secret from the storage backend"""
-        logger.info(f"Delete secret: {secret_id}")
+        logger.info(f"Delete secret: {short_id(secret_id)}")
         return self.backend.delete_secret(secret_id)
 
     def claim_secret(self, secret_id):

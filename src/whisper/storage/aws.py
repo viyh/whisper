@@ -5,7 +5,7 @@ import os
 import boto3
 from botocore.exceptions import ClientError
 
-from whisper import secret
+from whisper import secret, short_id
 from whisper.storage import store
 
 logger = logging.getLogger(__name__)
@@ -66,7 +66,7 @@ class s3(store):
         if not s.check_id():
             return False
         path = self._path(s.id)
-        logger.debug(f"Reading S3 secret: {path}")
+        logger.debug(f"Reading S3 secret: {short_id(s.id)}")
         try:
             raw = self.client.get_object(Bucket=self.config.bucket_name, Key=path)[
                 "Body"
@@ -80,7 +80,7 @@ class s3(store):
             if not s.load_from_dict(json.loads(raw)):
                 return False
         except ValueError as e:
-            logger.error(f"Could not parse S3 object {path}: {e}")
+            logger.error(f"Could not parse S3 secret {short_id(secret_id)}: {e}")
             return False
         return s if s.check_id() else False
 
@@ -97,7 +97,7 @@ class s3(store):
     def set_secret(self, s):
         if not s.check_id():
             return False
-        logger.debug(f"Saving S3 secret: {s.id}")
+        logger.debug(f"Saving S3 secret: {short_id(s.id)}")
         self._upload(s)
         return True
 
@@ -115,11 +115,11 @@ class s3(store):
             if _gone_or_changed(e):
                 return False
             raise
-        logger.debug(f"Updated S3 secret: {s.id}")
+        logger.debug(f"Updated S3 secret: {short_id(s.id)}")
         return True
 
     def delete_secret(self, secret_id):
-        logger.info(f"Deleting S3 secret: {secret_id}")
+        logger.info(f"Deleting S3 secret: {short_id(secret_id)}")
         # S3 deletes of missing keys succeed, so no NotFound handling needed
         self.client.delete_object(
             Bucket=self.config.bucket_name, Key=self._path(secret_id)
@@ -162,7 +162,7 @@ class s3(store):
                     # back to reading the dates from the object itself
                     stored = self.get_secret(secret_id)
                     if not stored:
-                        logger.warning(f"Skipping unreadable S3 object: {key}")
+                        logger.warning(f"Skipping unreadable S3 secret: {short_id(secret_id)}")
                         continue
                     dates = (stored.create_date, stored.expire_date)
                 s.create_date, s.expire_date = dates

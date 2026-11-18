@@ -5,7 +5,7 @@ import os
 from google.api_core.exceptions import NotFound, PreconditionFailed
 from google.cloud import storage
 
-from whisper import secret
+from whisper import secret, short_id
 from whisper.storage import store
 
 logger = logging.getLogger(__name__)
@@ -53,7 +53,7 @@ class gcs(store):
         if not s.check_id():
             return False
         path = self._path(s.id)
-        logger.debug(f"Reading GCS secret: {path}")
+        logger.debug(f"Reading GCS secret: {short_id(s.id)}")
         try:
             raw = self.bucket.blob(path).download_as_bytes()
         except NotFound:
@@ -63,7 +63,7 @@ class gcs(store):
             if not s.load_from_dict(json.loads(raw)):
                 return False
         except ValueError as e:
-            logger.error(f"Could not parse GCS object {path}: {e}")
+            logger.error(f"Could not parse GCS secret {short_id(secret_id)}: {e}")
             return False
         return s if s.check_id() else False
 
@@ -83,7 +83,7 @@ class gcs(store):
     def set_secret(self, s):
         if not s.check_id():
             return False
-        logger.debug(f"Saving GCS secret: {s.id}")
+        logger.debug(f"Saving GCS secret: {short_id(s.id)}")
         self._upload(s)
         return True
 
@@ -99,11 +99,11 @@ class gcs(store):
             self._upload(s, if_generation_match=blob.generation)
         except (NotFound, PreconditionFailed):
             return False
-        logger.debug(f"Updated GCS secret: {s.id}")
+        logger.debug(f"Updated GCS secret: {short_id(s.id)}")
         return True
 
     def delete_secret(self, secret_id):
-        logger.info(f"Deleting GCS secret: {secret_id}")
+        logger.info(f"Deleting GCS secret: {short_id(secret_id)}")
         try:
             self.bucket.delete_blob(self._path(secret_id))
         except NotFound:
@@ -136,7 +136,7 @@ class gcs(store):
                 # fall back to reading the dates from the object itself
                 stored = self.get_secret(secret_id)
                 if not stored:
-                    logger.warning(f"Skipping unreadable GCS object: {blob.name}")
+                    logger.warning(f"Skipping unreadable GCS secret: {short_id(secret_id)}")
                     continue
                 dates = (stored.create_date, stored.expire_date)
             s.create_date, s.expire_date = dates

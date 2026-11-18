@@ -25,6 +25,13 @@ ENV PATH=/opt/venv/bin:$PATH \
     WEB_PORT=8000 \
     LOG_LEVEL=INFO
 
+# Remove the base image's system pip, setuptools and wheel: whisper's virtualenv
+# doesn't use them, and scanners flag pip's vendored setuptools metadata. The
+# runtime image has no shell, so this runs Python directly (exec-form RUN).
+# (numeric uid: the image has no "root" entry in /etc/passwd)
+USER 0
+RUN ["python3", "-c", "import glob, os, shutil\nfor pattern in ('/usr/lib/python3/dist-packages/*', '/usr/bin/pip', '/usr/bin/pip3'):\n    for path in glob.glob(pattern):\n        shutil.rmtree(path) if os.path.isdir(path) and not os.path.islink(path) else os.remove(path)"]
+
 COPY --from=build /opt/venv /opt/venv
 COPY --from=build /usr/src/app /usr/src/app
 

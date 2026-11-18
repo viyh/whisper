@@ -1,6 +1,7 @@
 import importlib
 import logging
 import os
+import re
 import secrets
 import time
 
@@ -173,6 +174,31 @@ def apply_proxy_fix(wsgi_app, trusted_proxy_count=0):
     # proxies overwrite (rather than append to) X-Forwarded-Proto, so only
     # the nearest one is trusted for the scheme
     return ProxyFix(wsgi_app, x_for=trusted_proxy_count, x_proto=1, x_host=0)
+
+
+_LOG_ID_CHARS = frozenset("0123456789abcdefABCDEF")
+
+
+def short_id(secret_id):
+    """Loggable form of a secret ID.
+
+    A secret ID is the random part of the share link, so full IDs in logs
+    would hand every live link to anyone who can read the logs. The first 8
+    hex characters are enough to correlate log lines but not to rebuild the
+    link. Non-hex characters are dropped, so attacker-supplied IDs from the
+    URL can't inject into logs either.
+    """
+    if not isinstance(secret_id, str):
+        return "..."
+    return "".join(c for c in secret_id[:8] if c in _LOG_ID_CHARS) + "..."
+
+
+_SECRET_ID_PATTERN = re.compile(r"\b[0-9a-f]{40}\b")
+
+
+def redact_secret_ids(text):
+    """Shorten every secret ID (40 hex characters) in text, e.g. URLs."""
+    return _SECRET_ID_PATTERN.sub(lambda m: m.group(0)[:8] + "...", text)
 
 
 def class_loader(classname, *args, **kwargs):
