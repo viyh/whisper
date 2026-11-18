@@ -5,9 +5,9 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.0] - 2026-11-18
 
-New secret and link format (v3). Links and secrets made by earlier versions can't be opened: old links show a notice instead, and their stored secrets are deleted when they expire.
+**Breaking:** new secret and link format (v3). Links and secrets made by earlier versions can't be opened: old links show a notice instead, and their stored secrets are deleted when they expire.
 
 ### Security
 * The link and the password are both needed to open a secret, even with a copy of the server's storage and `secret_key`. A link is now `https://<host>/#<token>`: 22 random base58 characters (about 129 bits) after the `#`, which browsers never send to servers. From the token and the password, the browser derives the secret ID (SHA-256 of the token, which the server stores the secret under) and, with Argon2id salted with the token and then HKDF, the AES-256-GCM key and an auth token. The server stores an HMAC-SHA256 of the auth token, keyed with `secret_key`, and checks it before releasing the ciphertext. In 0.3.x the key came from PBKDF2 with a salt shared by every secret on a site, so with a copy of the storage, each password guess could be tried against all secrets at once.
