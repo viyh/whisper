@@ -1,28 +1,38 @@
-FROM python:3.14-slim
+# Docker Hardened Images (https://dhi.io) are free but need a Docker account:
+#   docker login dhi.io
 
-ENV WEB_PORT=8000
-ENV LOG_LEVEL=INFO
-
-RUN mkdir -p /usr/src/app \
-    && apt-get update \
-    && apt-get upgrade -y --no-install-recommends \
-    && apt-get install -y --no-install-recommends \
-        nginx \
-        gettext-base \
-    && rm -rf /var/lib/apt/lists/* \
-    && rm -rf /etc/nginx/sites-enabled/default \
-    && rm -rf /tmp/*
+# Build stage: the -dev variant has a shell and pip for installing packages.
+FROM dhi.io/python:3.14-debian13-dev AS build
 
 WORKDIR /usr/src/app
 
-COPY --chmod=755 ./src /usr/src/app/
-COPY --chmod=755 ./src/nginx.template.conf /tmp/nginx.template.conf
-COPY --chmod=755 ./scripts/run.sh /run.sh
+COPY src/requirements.txt ./
+RUN python3 -m venv /opt/venv \
+    && /opt/venv/bin/pip install --no-cache-dir -r requirements.txt \
+    && /opt/venv/bin/pip uninstall -y pip
 
-RUN pip install --no-cache-dir -r requirements.txt
+COPY src/ ./
+RUN rm -rf tests requirements*.txt config.yaml \
+    && python3 -m compileall -q /usr/src/app
 
-EXPOSE $WEB_PORT
+# Runtime stage: no shell or package manager. Same Python path as the build
+# stage (/usr/bin/python3), so the virtualenv works as-is.
+FROM dhi.io/python:3.14-debian13
 
-USER nobody
+ENV PATH=/opt/venv/bin:$PATH \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    WEB_PORT=8000 \
+    LOG_LEVEL=INFO
 
-CMD ["sh", "/run.sh"]
+COPY --from=build /opt/venv /opt/venv
+COPY --from=build /usr/src/app /usr/src/app
+
+WORKDIR /usr/src/app
+
+EXPOSE 8000
+
+# nobody, as in previous releases, so existing volume permissions keep working
+USER 65534:65534
+
+CMD ["gunicorn", "--config", "gunicorn.conf.py", "app:app"]

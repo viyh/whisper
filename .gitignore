@@ -95,3 +95,11 @@ ENV/
 
 # Rope project settings
 .ropeproject
+
+# Terraform (examples/terraform)
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfplan
+terraform.tfvars
