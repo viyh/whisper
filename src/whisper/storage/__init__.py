@@ -69,7 +69,9 @@ class store:
         return s
 
     def set_secret(self, secret):
-        """Save a secret to the storage backend"""
+        """Save a new secret. Never overwrites: returns False if a secret with
+        this ID already exists. IDs come from the browser, so this is what
+        stops anyone from replacing an existing secret."""
         return self.backend.set_secret(secret)
 
     def update_secret(self, secret):

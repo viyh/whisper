@@ -31,8 +31,12 @@ class local(store):
         if not s.check_id():
             return False
         secret_filename = os.path.join(self.config.path, f"{s.id}.json")
-        # owner-only permissions; secret files are never meant to be shared
-        fd = os.open(secret_filename, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        # create-only (O_EXCL): never replace an existing secret.
+        # Owner-only permissions; secret files are never meant to be shared.
+        try:
+            fd = os.open(secret_filename, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            return False
         with os.fdopen(fd, "w") as secret_file:
             json.dump(s.__dict__, secret_file)
         logger.debug(f"Saving secret: {short_id(s.id)}")

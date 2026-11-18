@@ -7,32 +7,22 @@ Share passwords, credentials, keys, or other sensitive data without using insecu
 ### Architecture
 
 ```mermaid
-flowchart TD
-    subgraph Client ["Client-side"]
-        direction LR
-        PS["Plaintext<br>Secret"] -->|"encrypt with<br>Web Crypto API"| AES["AES-256-GCM<br>Encrypted Secret"]
-        PP["Plaintext<br>Password"] -.->|"used as<br>encryption key"| AES
-        PP -->|"hash with<br>Argon2id WASM"| AH["Argon2id<br>Password Hash"]
-    end
+%%{init: {"sequence": {"mirrorActors": false}}}%%
+sequenceDiagram
+    participant S as Sender's browser
+    participant R as Recipient's browser
+    participant W as Whisper server
 
-    subgraph Server ["Server-side"]
-        direction LR
-        SK["Server<br>Secret Key"] -.-> SAH
-        AH2["Argon2id<br>Password Hash"] -->|"re-hash with<br>server key"| SAH["Argon2id<br>Server Hash"]
-        SAES["AES-256-GCM<br>Encrypted Secret"]
-    end
-
-    AES --> SAES
-    AH --> AH2
-
-    style PS fill:#e74c3c,color:#fff
-    style PP fill:#e74c3c,color:#fff
-    style AES fill:#3498db,color:#fff
-    style AH fill:#e8a0a0,color:#333
-    style SK fill:#f39c12,color:#fff
-    style AH2 fill:#e8a0a0,color:#333
-    style SAH fill:#aed6f1,color:#333
-    style SAES fill:#aed6f1,color:#333
+    Note over S: Picks a random link token<br/>ID = SHA-256(token)<br/>Argon2id(password, salt = token), then HKDF:<br/>encryption key + auth token<br/>Encrypts the secret with AES-256-GCM
+    S->>W: ID, auth token, ciphertext
+    Note over W: Stores the ciphertext and<br/>HMAC(secret_key, auth token)<br/>under the ID
+    S-->>R: Link: https://host/#35;token
+    S-->>R: Password, sent separately
+    Note over R: Derives the ID, auth token and key<br/>from the link token + password
+    R->>W: ID, auth token
+    W->>R: Ciphertext, if the HMAC matches<br/>(one-time secrets are deleted)
+    Note over R: Decrypts with the encryption key
+    Note over W: Never sees the password,<br/>the link token or the secret
 ```
 
 ## How It Works
@@ -47,11 +37,11 @@ flowchart TD
 
 Whisper uses a layered security approach:
 
-- **Client-side encryption**: Secrets are encrypted with AES-256-GCM (Web Crypto API) before leaving the browser. The server never has access to plaintext data.
-- **Argon2id password hashing**: Passwords are hashed client-side using Argon2id (WASM) before transmission. The server re-hashes with its own Argon2id salt, so even a compromised server cannot recover passwords.
+- **Client-side encryption**: Secrets are encrypted with AES-256-GCM (Web Crypto API) before leaving the browser. The server never has access to plaintext data or passwords.
+- **The link and the password are both needed**: Each link ends in a random token after the `#`, which browsers never send to servers. The browser derives the encryption key from the password with Argon2id (WASM), salted with the token, and the server stores each secret under a hash of the token. The server, its storage and its logs can't decrypt a secret or tell which link it belongs to, and a copy of the storage is useless without the links, even with `secret_key`.
 - **One-time secrets**: Deleted atomically after retrieval -- concurrent requests cannot both succeed. Unread one-time secrets are deleted after 30 days.
-- **Rate limiting**: 10 attempts per minute per IP, plus per-secret lockout after 10 failed password attempts. Behind a load balancer, set `trusted_proxy_count` (see [Running Behind a Proxy](#running-behind-a-proxy)).
-- **Strict CSP**: No inline scripts. Content-Security-Policy with explicit allowlists.
+- **Rate limiting**: 10 attempts per minute per IP, plus a per-secret lock after 10 wrong passwords (`max_failed_attempts`). Behind a load balancer, set `trusted_proxy_count` (see [Running Behind a Proxy](#running-behind-a-proxy)).
+- **Strict CSP**: No inline scripts or styles, and nothing is loaded from other sites.
 
 See [Security Details](#security-details) for the full cryptographic design.
 
@@ -84,7 +74,7 @@ Copy `src/config.default.yaml` to `config.yaml` and customize. Mount it into the
 
 | Setting | Description |
 |---------|-------------|
-| `secret_key` | Server-level secret for password hashing. Must be a unique random string of 32+ characters. **Change this from the default.** |
+| `secret_key` | Server secret that keys the stored HMAC of each secret's auth token (see [Cryptographic Flow](#cryptographic-flow-v3)). Must be a unique random string of 32+ characters. **Change this from the default.** |
 | `storage_class` | Storage backend class path (see [Storage Backends](#storage-backends)). |
 
 ### Optional Settings
@@ -97,9 +87,10 @@ Copy `src/config.default.yaml` to `config.yaml` and customize. Mount it into the
 | `app_listen_ip` | `0.0.0.0` | Listen address for the development server (`python app.py`) only. |
 | `app_port` | `5000` | Port for the development server only. In the container, see `WEB_PORT`. |
 | `app_url_base` | `/` | URL base path (e.g., `/whisper/` for subpath hosting). |
-| `argon2_time_cost` | `5` | Argon2id time cost parameter. Higher = slower + more secure. |
+| `argon2_time_cost` | `5` | Argon2id time cost for the key derivation, which runs in the browser. Higher = slower to create and open secrets, and slower to guess passwords. Changing any Argon2id setting makes unexpired secrets unopenable. |
 | `argon2_memory_cost` | `131072` | Argon2id memory cost in KB (131072 = 128 MB). |
-| `argon2_parallelism` | `1` | Argon2id parallelism parameter. |
+| `argon2_parallelism` | `1` | Argon2id parallelism. |
+| `max_failed_attempts` | `10` | Wrong passwords allowed per secret before it locks until it expires. `0` turns the lock off; the per-IP rate limit still applies. |
 | `trusted_proxy_count` | `0` | Number of `X-Forwarded-For` entries added by proxies in front of the container. See [Running Behind a Proxy](#running-behind-a-proxy). |
 
 ### Environment Variables
@@ -107,7 +98,7 @@ Copy `src/config.default.yaml` to `config.yaml` and customize. Mount it into the
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `WEB_PORT` | `8000` | Port the container listens on. |
-| `WEB_THREADS` | `2` | Concurrent requests handled. Each in-flight password hash uses `argon2_memory_cost` of RAM (128 MB by default), so allow about 128 MB per thread plus 100 MB. |
+| `WEB_THREADS` | `2` | Concurrent requests handled. |
 | `LOG_LEVEL` | `INFO` | Set to `DEBUG` for verbose logging. |
 | `CONFIG_FILE` | `config.yaml` | Config file path inside the container. |
 | `WHISPER_CONFIG` | | The config YAML itself. If set, used instead of `CONFIG_FILE`. For platforms that inject secrets as environment variables (e.g. ECS). |
@@ -230,45 +221,49 @@ Disable the bucket's soft delete policy and object versioning so deleted secrets
 
 ```json
 {
-    "id": "8d692508856cabba82d73e15ef6f0364de70546c",
-    "create_date": 1657421435,
+    "id": "ef61c74ad052f48f54d58eda0a5aeae3b90cd0d7ba7d25ce62b605ed6bfd59f1",
+    "create_date": 1795075200,
     "expire_date": -1,
-    "data": "U2FsdGVkX1/qMytBOYisCGZ3KjpkowinHQhu12lGY8E=",
-    "hash": "$argon2id$v=19$m=131072,t=5,p=1$...",
-    "version": 2
+    "data": "Zwt3ihvb8Pe0oeBQHB8vjJZ4Y6yI+pn/36pZXoSuYFAA8S13B8XsnFL6YvqBaf4GaG0IRg==",
+    "hash": "db8ad3a89de86ef3295c3cf50f4f915fa065e736fcc4d90849f1580268733099",
+    "version": 3,
+    "failed_attempts": 0
 }
 ```
 
 | Field | Description |
 |-------|-------------|
-| `id` | 160-bit random hex identifier (40 chars). |
+| `id` | SHA-256 of the link token (64 hex characters). The token itself never reaches the server. |
 | `create_date` | UNIX timestamp of creation. |
 | `expire_date` | UNIX timestamp of expiration, or `-1` for one-time use. |
-| `data` | Client-encrypted ciphertext (AES-256-GCM for v2, AES-CBC for v1). |
-| `hash` | Server-side password hash (Argon2id for v2, bcrypt for v1). |
-| `version` | Crypto version: `1` = legacy, `2` = current. |
+| `data` | Ciphertext from the browser: the 96-bit IV followed by the AES-256-GCM ciphertext, base64-encoded. |
+| `hash` | HMAC-SHA256 of the auth token, keyed with `secret_key`. |
+| `version` | Format version. Only `3` can be created or opened (see [Older Links](#older-links)). |
+| `failed_attempts` | Wrong passwords so far (see `max_failed_attempts`). |
 
-### Cryptographic Flow (v2)
+### Cryptographic Flow (v3)
 
 **Creating a secret:**
-1. User enters plaintext + password.
-2. Client hashes password with **Argon2id** (configurable params, public salt from URL origin).
-3. Client encrypts plaintext with **AES-256-GCM** via Web Crypto API (random 96-bit IV, PBKDF2-derived key at 600,000 iterations).
-4. Client sends encrypted data + Argon2id hash to server.
-5. Server re-hashes with **Argon2id** using server `secret_key` as additional input.
-6. Server stores encrypted data + server-side hash.
+1. The browser picks a random 22-character link token (base58, about 129 bits).
+2. The secret ID is the SHA-256 of `"whisper v3 id:"` + token.
+3. Argon2id(password, salt = token, with the configured cost) gives 256 bits, which HKDF-SHA256 splits into an AES-256-GCM key and a 256-bit auth token.
+4. The browser encrypts the secret with AES-256-GCM, using a random 96-bit IV and the secret ID as additional data, which binds the ciphertext to its ID.
+5. It sends the ID, the auth token and the ciphertext. The server stores the ciphertext and HMAC-SHA256(`secret_key`, auth token) under the ID, and never overwrites an existing ID.
+6. The link is `https://<host>/#<token>`. Browsers don't send the part after `#` to servers.
 
-**Retrieving a secret:**
-1. Client hashes password with Argon2id (same params).
-2. Server verifies against stored hash.
+**Opening a secret:**
+1. The browser takes the token from the link and derives the ID, auth token and key from it and the password, as above.
+2. It sends the ID and the auth token. The server compares HMACs in constant time, and counts wrong passwords toward `max_failed_attempts`.
 3. For one-time secrets: atomic claim-and-delete before returning data.
-4. Client decrypts with AES-256-GCM using original password.
+4. The browser decrypts the secret and removes the token from the address bar and history.
 
-The server **never** has access to the plaintext password or data.
+The server **never** sees the plaintext, the password, or the link token. Someone with a copy of the storage and `secret_key` but not the link can't decrypt a secret or guess its password offline, since the token is the Argon2id salt.
 
-### Legacy v1 Secrets
+### Older Links
 
-If you have a pre-0.2.0 secret link that was created with the v1 format (PBKDF2 + bcrypt + CryptoJS AES-CBC), check out the [`release/0.1.0_to_0.2.0`](../../tree/release/0.1.0_to_0.2.0) branch, which retains v1 decryption support.
+Links made before 0.4.0 (`https://<host>/<40 hex characters>`) can't be opened by 0.4.0 or later; Whisper says so instead. Their stored secrets are deleted when they expire.
+
+For pre-0.2.0 (v1) links, check out the [`release/0.1.0_to_0.2.0`](../../tree/release/0.1.0_to_0.2.0) branch, which retains v1 decryption support.
 
 ### Rate Limiting
 
@@ -284,7 +279,7 @@ Storage backends must subclass `store` and implement:
 |--------|-------------|
 | `start()` | Initialize the backend. |
 | `get_secret(secret_id)` | Return secret object or `False`. |
-| `set_secret(s)` | Save a secret object. |
+| `set_secret(s)` | Save a new secret. Never overwrite: atomically return `False` without writing if one with that ID exists (IDs come from the browser). |
 | `delete_secret(secret_id)` | Delete a secret. |
 | `update_secret(s)` | Save changes to an existing secret; return `False` without writing if it no longer exists (never recreates a claimed secret). |
 | `claim_secret(secret_id)` | Atomically delete and return `True` if it existed (for one-time secrets). |
@@ -319,9 +314,9 @@ docker buildx build --platform=linux/amd64,linux/arm64 \
 
 **Backend**: Python 3.14, Flask 3.1, Gunicorn 27 (Docker Hardened Images, Debian 13)
 
-**Client-side crypto**: Web Crypto API (AES-256-GCM, PBKDF2), argon2-browser (WASM)
+**Client-side crypto**: Web Crypto API (AES-256-GCM, HKDF, SHA-256), argon2-browser (WASM, served from the image; see `src/whisper/assets/vendor`)
 
-**Frontend**: Bootstrap 5.3, clipboard.js, vanilla JS (no jQuery)
+**Frontend**: vanilla JS and CSS, no framework and no CDN (copy uses the browser Clipboard API)
 
 **Storage**: Local disk, in-memory, AWS S3, GCP Cloud Storage
 

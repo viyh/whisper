@@ -37,15 +37,17 @@ certificate, its validation records, and the alias record are created for you.
 
 Check the client IP that Whisper sees, since rate limiting depends on it:
 
-1. Open the site and request any secret link. The request's log line
-   (`[<ip>] ...`) should show your public IP, not a Google, AWS, or private
-   address. If it does, raise `trusted_proxy_count` by one.
+1. Open the site and create a secret. Its log line (`[<ip>] Secret create: ...`)
+   should show your public IP, not a Google, AWS, or private address. If it
+   does, raise `trusted_proxy_count` by one.
 2. Send a request with a fake header and check it is ignored:
    ```bash
+   Z=$(printf '%064d' 0)
    curl -s -H 'X-Forwarded-For: 1.2.3.4' -H 'Content-Type: application/json' \
-     -d '{"password":"x"}' https://<domain>/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+     -d "{\"id\":\"$Z\",\"auth\":\"$Z\"}" https://<domain>/retrieve
    ```
-   The log should show your real IP, not `1.2.3.4`.
+   The log line (`[<ip>] Secret not found: 00000000...`) should show your real
+   IP, not `1.2.3.4`.
 
 ## Notes
 
@@ -54,8 +56,8 @@ Check the client IP that Whisper sees, since rate limiting depends on it:
   secrets unreadable.
 - **One instance.** Rate limits are kept in memory per instance, so both
   examples run a single instance (`max_instances` / `desired_count`).
-- **Memory.** Each concurrent password hash uses 128 MB. The defaults (512Mi on
-  Cloud Run, 1 GB on Fargate) fit the image's default `WEB_THREADS=2`.
+- **Memory.** The server does no password hashing (that runs in the browser),
+  so the defaults (512Mi on Cloud Run, 1 GB on Fargate) leave plenty of room.
 - **Cost.** Cloud Run scales to zero. The AWS example has fixed costs: the ALB
   and one always-on Fargate task.
 - These are starting points, not hardened production modules: there is no WAF,

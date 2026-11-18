@@ -11,10 +11,8 @@ bind = f"0.0.0.0:{os.environ.get('WEB_PORT', '8000')}"
 
 # One process: rate-limit state is kept in memory per process, so more
 # workers would multiply the effective limit. Threads provide concurrency and
-# keep one slow client from blocking everyone else. Each in-flight password
-# hash uses argon2_memory_cost of RAM (128 MB by default), so size the
-# container's memory for WEB_THREADS concurrent hashes plus ~100 MB. The
-# default of 2 fits a 512 MB container.
+# keep one slow client from blocking everyone else. Requests are light: the
+# password hashing runs in the browser.
 workers = 1
 worker_class = "gthread"
 threads = int(os.environ.get("WEB_THREADS", "2"))
