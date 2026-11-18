@@ -5,7 +5,8 @@
 # Maximum upload size in KB
 max_data_size_kb: 100
 
-# Server level secret key used for additional security when encrypting secrets.
+# Server secret key. It keys the HMAC the server stores for each secret's auth
+# token, which it checks before releasing the encrypted data.
 # IMPORTANT: Change this to a unique random string of 32+ characters!
 secret_key: 'CHANGE_ME_TO_A_RANDOM_STRING_OF_32_OR_MORE_CHARACTERS'
 
@@ -27,8 +28,14 @@ app_url_base: /
 # a Proxy".
 trusted_proxy_count: 0
 
-# Argon2id password hashing parameters (v2 secrets)
-# Higher values = more secure but slower. Must match on client and server.
+# Wrong passwords allowed per secret before it is locked until it expires.
+# 0 turns the lock off (the per-IP limit of 10 attempts a minute still applies).
+max_failed_attempts: 10
+
+# Argon2id cost of deriving the keys from the password. This runs in the
+# browser; the server only passes these values to the page. Higher = slower to
+# create and open secrets, and slower to guess passwords. Changing them makes
+# unexpired secrets unopenable.
 # OWASP minimum: time=3, memory=65536 (64MB), parallelism=1
 argon2_time_cost: 5
 argon2_memory_cost: 131072

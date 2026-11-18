@@ -39,7 +39,7 @@ variable "task_cpu" {
 }
 
 variable "task_memory" {
-  description = "Fargate task memory (MiB). Each concurrent password hash uses 128 MB; 1024 leaves headroom for the default 2 threads."
+  description = "Fargate task memory (MiB). 1024 is the least Fargate allows with 512 CPU units, and the password hashing runs in the browser, so it leaves plenty of room."
   type        = number
   default     = 1024
 }

@@ -103,3 +103,8 @@ ENV/
 *.tfstate.*
 *.tfplan
 terraform.tfvars
+
+# Vendored front-end libraries are committed
+# (see src/whisper/assets/vendor/README.md)
+!src/whisper/assets/vendor/**/dist/
+!src/whisper/assets/vendor/**/lib/
