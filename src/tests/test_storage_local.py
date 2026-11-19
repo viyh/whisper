@@ -89,3 +89,57 @@ def test_delete_expired(backend):
     backend.delete_expired()
     assert backend.get_secret(live.id)
     assert backend.get_secret(dead.id) is False
+
+
+def test_storage_directory_is_owner_only(backend):
+    assert stat.S_IMODE(os.stat(backend.config.path).st_mode) == 0o700
+
+
+def test_failed_attempts_count_atomically(backend):
+    import threading
+
+    s = _make_secret()
+    backend.set_secret(s)
+    start = threading.Barrier(20)
+
+    def wrong_password():
+        start.wait()
+        assert backend.increment_failed_attempts(backend.get_secret(s.id)) is True
+
+    threads = [threading.Thread(target=wrong_password) for _ in range(20)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert backend.get_secret(s.id).failed_attempts == 20
+
+
+def test_failed_attempt_does_not_recreate_claimed_secret(backend):
+    s = _make_secret()
+    backend.set_secret(s)
+    loaded = backend.get_secret(s.id)
+    assert backend.claim_secret(s.id) is True
+    assert backend.increment_failed_attempts(loaded) is False
+    assert backend.get_secret(s.id) is False
+
+
+def test_cleaner_leaves_a_new_unreadable_file_alone(backend):
+    """It may be another process halfway through writing it."""
+    sid = secrets.token_hex(32)
+    path = os.path.join(backend.config.path, f"{sid}.json")
+    with open(path, "w") as f:
+        f.write('{"id": "')  # half-written
+    backend.delete_expired()
+    assert os.path.exists(path)
+    old = os.path.getmtime(path) - 120
+    os.utime(path, (old, old))
+    backend.delete_expired()
+    assert not os.path.exists(path)
+
+
+def test_delete_secret_tolerates_a_file_that_is_already_gone(backend, monkeypatch):
+    s = _make_secret()
+    backend.set_secret(s)
+    assert backend.claim_secret(s.id) is True
+    monkeypatch.setattr(os.path, "exists", lambda p: True)  # lose the race
+    assert backend.delete_secret(s.id) is True

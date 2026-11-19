@@ -169,3 +169,10 @@ def test_delete_expired_falls_back_to_object_without_tags(backend):
     backend.stub.add_response("get_object", {"Body": StreamingBody(io.BytesIO(body), len(body))})
     backend.stub.add_response("delete_object", {}, {"Bucket": BUCKET, "Key": key})
     backend.delete_expired()
+
+
+@pytest.mark.parametrize("bucket_path", ["secrets", "/secrets", "/secrets/", "secrets/"])
+def test_secrets_are_stored_where_the_cleaner_looks(backend, bucket_path):
+    backend.config.bucket_path = bucket_path
+    assert backend._path(SID) == KEY
+    assert backend._path(SID).startswith(backend._list_prefix())

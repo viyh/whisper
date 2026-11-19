@@ -136,6 +136,7 @@ def load_config(config_filenames=None, config_text=None):
         "argon2_parallelism": DEFAULT_ARGON2_PARALLELISM,
         "trusted_proxy_count": 0,
         "max_failed_attempts": 10,
+        "create_rate_limit": 30,
     }
 
     # initialize config with default values (copy - we mutate this below and
@@ -143,23 +144,56 @@ def load_config(config_filenames=None, config_text=None):
     config = dict(default_config)
     if config_text is not None:
         config.update(_parse_config_yaml(config_text, "WHISPER_CONFIG"))
-        return check_config(config, default_config)
-    for config_filename in config_filenames:
-        if not os.path.exists(config_filename):
-            logger.error(f"Config file does not exist, skipping. {config_filename}")
-            continue
-        with open(config_filename, "r") as config_file:
-            config.update(_parse_config_yaml(config_file, config_filename))
+    else:
+        for config_filename in config_filenames:
+            if not os.path.exists(config_filename):
+                logger.error(f"Config file does not exist, skipping. {config_filename}")
+                continue
+            with open(config_filename, "r") as config_file:
+                config.update(_parse_config_yaml(config_file, config_filename))
     # check that loaded config is set correctly and return the config object
-    return check_config(config, default_config)
+    config = check_config(config, default_config)
+    check_secret_key(config.secret_key)
+    check_non_negative_int("create_rate_limit", config.create_rate_limit)
+    config.app_url_base = normalize_url_base(config.app_url_base)
+    return config
+
+
+#: Placeholder secret_key in config.default.yaml (refused, not used)
+PLACEHOLDER_SECRET_KEY_MARKER = "CHANGE_ME"  # nosec B105
+
+
+def check_secret_key(value):
+    """Refuse to start with a secret_key that isn't a string, is empty, or is
+    still the placeholder from config.default.yaml (a publicly known HMAC key).
+    Short keys are only warned about, in app.py."""
+    if not isinstance(value, str):
+        raise ConfigError("secret_key", "Must be a string (quote it in the YAML)")
+    if not value.strip():
+        raise ConfigError("secret_key", "Must not be empty")
+    if PLACEHOLDER_SECRET_KEY_MARKER in value:
+        raise ConfigError("secret_key", "Still the placeholder; set a unique random string")
+    return value
+
+
+def normalize_url_base(value):
+    """Make app_url_base start and end with "/" ("whisper" -> "/whisper/"),
+    since routes are built by appending to it."""
+    if not isinstance(value, str):
+        raise ConfigError("app_url_base", "Must be a string")
+    return "/" + value.strip("/") + "/" if value.strip("/") else "/"
+
+
+def check_non_negative_int(name, value):
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ConfigError(name, "Must be a non-negative integer")
+    return value
 
 
 def check_max_failed_attempts(value):
     """Validate max_failed_attempts: wrong passwords allowed per secret before
     it locks until it expires. 0 turns the lock off."""
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        raise ConfigError("max_failed_attempts", "Must be a non-negative integer")
-    return value
+    return check_non_negative_int("max_failed_attempts", value)
 
 
 def apply_proxy_fix(wsgi_app, trusted_proxy_count=0):

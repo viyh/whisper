@@ -8,6 +8,7 @@ max_data_size_kb: 100
 # Server secret key. It keys the HMAC the server stores for each secret's auth
 # token, which it checks before releasing the encrypted data.
 # IMPORTANT: Change this to a unique random string of 32+ characters!
+# Whisper won't start while it is still this placeholder.
 secret_key: 'CHANGE_ME_TO_A_RANDOM_STRING_OF_32_OR_MORE_CHARACTERS'
 
 # Interval in seconds that the secret storage cleaner will run
@@ -19,7 +20,8 @@ storage_clean_interval: 900
 app_listen_ip: 0.0.0.0
 app_port: 5000
 
-# Base URL path for app, defaults to root
+# Base URL path for app, defaults to root. A missing leading or trailing
+# slash is added ("whisper" = "/whisper/").
 app_url_base: /
 
 # Number of X-Forwarded-For entries added by proxies in front of this
@@ -31,6 +33,9 @@ trusted_proxy_count: 0
 # Wrong passwords allowed per secret before it is locked until it expires.
 # 0 turns the lock off (the per-IP limit of 10 attempts a minute still applies).
 max_failed_attempts: 10
+
+# Secrets each IP address can create per minute. 0 turns the limit off.
+create_rate_limit: 30
 
 # Argon2id cost of deriving the keys from the password. This runs in the
 # browser; the server only passes these values to the page. Higher = slower to
