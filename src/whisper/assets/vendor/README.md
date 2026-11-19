@@ -33,6 +33,5 @@ used.
    tarball and check its SHA-512 against `dist.integrity`.
 2. Copy the four files above and `package/LICENSE` into a new
    `argon2-browser-<version>/` folder (same layout) and delete the old one.
-3. Update the script path in `templates/index.html` and `templates/show.html`
-   and the table above.
+3. Update the script path in `templates/index.html` and the table above.
 4. Check that secrets created before the update still open.

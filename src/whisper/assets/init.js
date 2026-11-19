@@ -11,19 +11,15 @@ function init_create_view() {
     // File selection
     document.getElementById('secret_file').addEventListener('change', function() {
         file_select();
-        var maxFileSizeKb = parseInt(document.getElementById('app-config').dataset.maxFileSizeKb || '100');
+        // while a secret is being created, new_link sets both when it's done
+        if (creating) return;
         var secretLink = document.getElementById('secret_link');
         var createSecret = document.getElementById('create_secret');
-        // Cancel in the file picker can leave no file selected
-        if (!this.files || this.files.length === 0) {
-            createSecret.disabled = false;
-            secretLink.value = secretLink.defaultValue;
-            return;
-        }
-        if (this.files[0].size / 1000 > maxFileSizeKb) {
+        if (file_too_large(this)) {
             createSecret.disabled = true;
-            secretLink.value = 'Maximum file size is ' + maxFileSizeKb + ' KB.';
+            secretLink.value = 'Maximum file size is ' + max_file_size_kb() + ' KB.';
         } else {
+            // including Cancel in the file picker, which can leave no file
             createSecret.disabled = false;
             secretLink.value = secretLink.defaultValue;
         }
@@ -59,6 +55,11 @@ function init_retrieve_view() {
 }
 
 document.addEventListener('DOMContentLoaded', function() {
+    // Web Crypto only exists on secure pages (HTTPS, or localhost): say so
+    // before anyone types a secret
+    if (!window.isSecureContext || !window.crypto || !window.crypto.subtle) {
+        document.getElementById('insecure_notice').hidden = false;
+    }
     init_clipboard();
     document.querySelectorAll('.pwtoggle').forEach(function(button) {
         button.addEventListener('click', function() {

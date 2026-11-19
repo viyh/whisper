@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+* If the page's scripts didn't run (blocked, failed to load, or JavaScript off), the create form could be submitted natively as `GET /?secret_text=<plaintext>`, which put the secret in access and proxy logs. The form fields no longer have names, and the CSP now has `form-action 'none'`.
+* Spellcheck, autocorrect and autocapitalize are off on the secret, password and link fields, so browsers' cloud spellcheckers (Chrome's Enhanced Spell Check, Edge's Microsoft Editor) don't send what's typed there.
+* Received files always download as `application/octet-stream`, so a browser that ignores the download attribute can't open an HTML or SVG file as a page on Whisper's origin. Control characters and bidirectional overrides are removed from received file names.
+* Pages and API answers send `Cache-Control: no-store`.
+* CSP: `base-uri 'none'`, and `blob:` removed from `img-src`. New `Cross-Origin-Opener-Policy` and `Cross-Origin-Resource-Policy` headers (`same-origin`).
+* An opened secret is no longer copied to the clipboard automatically, where clipboard managers and cross-device clipboard sync could pick it up; the copy button still copies it. A new link is still copied.
+* The AWS Terraform example's bucket policy refuses requests that aren't made over TLS.
+* S3 and GCS: wrong passwords are counted with a compare-and-swap against the version that was read, retried on a conflict. Before, simultaneous wrong passwords could undo each other's counts and allow extra guesses past `max_failed_attempts`.
+* A secret locked after `max_failed_attempts` wrong passwords has its ciphertext and auth hash deleted; a record that answers "locked" is kept until it expires. Before, the ciphertext stayed stored for up to 30 days. A secret locked by an earlier version is wiped on its next attempt. Raising `max_failed_attempts` no longer reopens a locked secret.
+
+### Changed
+* SECURITY.md describes what Whisper can't protect against: a compromised server, image or proxy serving modified JavaScript, the users' own devices, and per-IP rate limits resetting on restarts and Cloud Run cold starts.
+* The help text no longer says to copy the password before creating the link, since the link is then copied over it.
+* The Compose example logs at `INFO` instead of `DEBUG`.
+* The Docker image installs its Python packages with uv instead of pip, so builds are faster. The runtime image is unchanged: the same packages, and neither uv nor pip in it.
+
+### Fixed
+* Opening a one-time secret with a double click, or pressing Enter or Retrieve again after it opened, replaced the secret on screen with an error, and it couldn't be fetched again. Retrieve now stays disabled while a request runs and once the secret is open. A double click on Create no longer uploads two secrets.
+* A text secret that starts like a file (`filename:...,data:...;base64,`) but isn't one showed "Error decrypting secret."; it is now shown as text.
+* A file that can't be read (e.g. moved after it was chosen) left "Encrypting, please wait..." showing for good.
+* When the encryption code fails to load, the page says to reload instead of "Could not create link."
+* The page says upfront when it isn't served over HTTPS (browsers then don't provide the encryption it needs) or when JavaScript is off.
+* Local backend: a wrong-password update writes a new file and replaces the old one, so a crash or full disk mid-write can't leave a cut-off secret. A one-time claim removes the file directly; a crash between the old rename and remove could leave a `.claimed` copy of the secret behind, which the cleaner now deletes.
+* A stored record that is valid JSON but not an object (e.g. `null`) raised an error on read and stopped every cleanup run at that file. A record with missing or invalid dates now counts as expired.
+* `storage_clean_interval`, `max_data_size_kb` and the Argon2 settings must be positive integers, and `argon2_memory_cost` at least 8 x `argon2_parallelism`. `storage_clean_interval: 0` ran the cleaner nonstop, and a negative value stopped it.
+* S3 and GCS: a one-time claim that raced a wrong-password attempt could answer "already viewed" while the secret was still stored. It now retries.
+* S3: the cleaner no longer warns about an "unreadable" secret that was claimed while it ran.
+* A POST to an unknown path returns 404 instead of the answer meant for pre-0.4.0 links.
+* S3 and GCS object keys are built with `/` on every platform.
+
 ## [0.5.0] - 2026-11-18
 
 **Breaking:** Whisper now refuses to start while `secret_key` is still the placeholder from `config.default.yaml`, empty, or not a string (e.g. an unquoted number); set a unique random string. Secrets and links from 0.4.0 keep working.
