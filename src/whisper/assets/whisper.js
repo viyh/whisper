@@ -298,13 +298,36 @@ async function decrypt_secret(ciphertext_b64, keys) {
 
 // --- API call (vanilla fetch) ---
 
+function unexpected_response(status) {
+    return { result: 'Unexpected response from the server (HTTP ' + status + '). Please try again.' };
+}
+
+// Whisper answers in JSON, errors included. Anything else (no connection, an
+// HTML error page from a proxy in front of it, or an empty or cut-off body)
+// becomes a { result } message.
 async function api_post(path, data) {
-    var response = await fetch(base_path() + path, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json; charset=utf-8' },
-        body: JSON.stringify(data)
-    });
-    return await response.json();
+    var response;
+    try {
+        response = await fetch(base_path() + path, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json; charset=utf-8' },
+            body: JSON.stringify(data)
+        });
+    } catch (e) {
+        return { result: 'Could not reach the server. Check your connection and try again.' };
+    }
+    var type = response.headers.get('Content-Type') || '';
+    if (type.indexOf('application/json') === -1) {
+        if (response.status === 413) {
+            return { result: 'The secret is too large.' };
+        }
+        return unexpected_response(response.status);
+    }
+    try {
+        return await response.json();
+    } catch (e) {
+        return unexpected_response(response.status);
+    }
 }
 
 // --- Create secret flow ---
@@ -367,10 +390,13 @@ function dataURL_to_blob(file_mime, file_contents) {
 function download_secret_file(decrypted, file_name, file_mime) {
     var file_contents = atob(decrypted);
     var blob = dataURL_to_blob(file_mime, file_contents);
+    var url = URL.createObjectURL(blob);
     var file_dl = document.createElement('a');
     file_dl.download = file_name;
-    file_dl.href = window.URL.createObjectURL(blob);
+    file_dl.href = url;
     file_dl.click();
+    // revoking right away can cancel the download in some browsers
+    setTimeout(function() { URL.revokeObjectURL(url); }, 60000);
 }
 
 async function get_data(event) {
@@ -399,10 +425,14 @@ async function get_data(event) {
         // and browser history
         history.replaceState(null, '', location.pathname + location.search);
 
-        var regex = /^filename:(.+?),data:(\w+\/[-+.\w]+);base64,/;
-        var match = decrypted.substring(0, 100).match(regex);
+        // a file secret starts with "filename:<name>," then the file's data
+        // URL. Office types alone are 70+ characters, and files of unknown
+        // type can have an empty one ("data:;base64,").
+        var regex = /^filename:(.+?),data:([-+.\w]+\/[-+.\w]+)?;base64,/;
+        var match = decrypted.substring(0, 1024).match(regex);
         if (match) {
-            download_secret_file(decrypted.replace(regex, ''), match[1], match[2]);
+            download_secret_file(decrypted.replace(regex, ''), match[1],
+                match[2] || 'application/octet-stream');
             decrypted_text.value = 'Downloaded ' + match[1] + '.';
         } else {
             decrypted_text.value = decrypted;

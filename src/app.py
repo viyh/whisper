@@ -27,7 +27,7 @@ from whisper import (
 from whisper.log_redaction import install_redaction
 from whisper.storage import store
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 app = Flask("whisper")
 
@@ -54,10 +54,11 @@ app.wsgi_app = apply_proxy_fix(app.wsgi_app, config.trusted_proxy_count)
 
 check_max_failed_attempts(config.max_failed_attempts)
 
-# warn if secret_key looks like a default/placeholder
-if "CHANGE_ME" in config.secret_key or len(config.secret_key) < 32:
+# load_config refuses a missing or placeholder secret_key; a short one only
+# gets a warning
+if len(config.secret_key) < 32:
     app.logger.warning(
-        "WARNING: secret_key appears to be a default or is too short. "
+        "WARNING: secret_key is too short. "
         "Set a unique random string of 32+ characters in your config."
     )
 
@@ -79,7 +80,9 @@ VALID_EXPIRATIONS = {"One time use", "1 hour", "1 day", "1 week"}
 #     styles, so 'unsafe-inline' is not needed.
 #   - HSTS: Whisper's threat model assumes HTTPS termination in front of this
 #     container. Browsers ignore HSTS on plain-HTTP responses, so local
-#     development over http://localhost is unaffected.
+#     development over http://localhost is unaffected. No "preload": that
+#     opts a whole domain into browsers' built-in list, which is the
+#     operator's call, not Whisper's.
 SECURITY_HEADERS = {
     "X-Frame-Options": "DENY",
     "X-Content-Type-Options": "nosniff",
@@ -95,7 +98,7 @@ SECURITY_HEADERS = {
         "base-uri 'self'; "
         "form-action 'self';"
     ),
-    "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",
+    "Strict-Transport-Security": "max-age=63072000; includeSubDomains",
 }
 
 
@@ -134,16 +137,17 @@ def new_secret():
     )
 
 
+def create_rate_limit():
+    return f"{config.create_rate_limit} per minute"
+
+
 @app.route(f"{config.app_url_base}", methods=["POST"])
+@limiter.limit(create_rate_limit, exempt_when=lambda: config.create_rate_limit == 0)
 def create_secret():
     """Store a new secret, encrypted in the browser."""
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify({"result": "Invalid request"}), 400
-
-    # This has to be here in order for Flask to check against MAX_CONTENT_LENGTH
-    # See: https://github.com/pallets/flask/issues/2690
-    request.get_data(cache=True)
 
     # a page loaded before an upgrade sends an older format
     if data.get("version") != CURRENT_SECRET_VERSION:
@@ -206,10 +210,8 @@ def retrieve_secret():
     if not s.check_auth(data["auth"], config.secret_key):
         app.logger.info(f"[{request.remote_addr}] Secret invalid password: {short_id(s.id)}")
         if max_failed:
-            # update_secret (not set_secret) so a secret claimed by a
-            # concurrent request is never written back into storage
-            s.failed_attempts += 1
-            store.update_secret(s)
+            # never recreates a secret claimed by a concurrent request
+            store.record_failed_attempt(s)
         return jsonify({"result": "Invalid password."})
 
     # for one-time secrets, atomically claim before returning data
