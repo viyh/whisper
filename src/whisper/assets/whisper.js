@@ -113,7 +113,7 @@ function init_clipboard() {
             if (ok) {
                 show_tip(btn, 'Copied!');
             } else {
-                // an automatic copy (after creating/retrieving) can be refused
+                // the automatic copy of a new link can be refused
                 // by the browser without a direct click; ask for one
                 show_tip(btn, e.isTrusted ? 'Copy failed' : 'Click to copy');
             }
@@ -187,14 +187,36 @@ function file_select() {
     }
 }
 
+function max_file_size_kb() {
+    var el = document.getElementById('app-config');
+    return parseInt((el && el.dataset.maxFileSizeKb) || '100');
+}
+
+// Whether the chosen file is over max_data_size_kb
+function file_too_large(file_input) {
+    var file = file_input.files && file_input.files[0];
+    return !!file && file.size / 1000 > max_file_size_kb();
+}
+
 async function get_base64(file_input) {
     var file = file_input.files[0];
-    var result_base64 = await new Promise(function(resolve) {
+    var result_base64 = await new Promise(function(resolve, reject) {
         var fr = new FileReader();
         fr.onload = function() { resolve(fr.result); };
+        // e.g. the file was moved or deleted after it was chosen
+        fr.onerror = function() { reject(fr.error); };
         fr.readAsDataURL(file);
     });
     return 'filename:' + file.name + ',' + result_base64;
+}
+
+// A received file's name without control characters or bidirectional
+// overrides (U+202E can make "invoice<U+202E>fdp.exe" display as
+// "invoiceexe.pdf")
+var UNSAFE_NAME_CHARS = /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
+
+function safe_file_name(name) {
+    return name.replace(UNSAFE_NAME_CHARS, '') || 'download';
 }
 
 // --- Link token ---
@@ -218,6 +240,11 @@ function base_path() {
 
 // --- Crypto (v3): Argon2id + HKDF + AES-256-GCM, see the top of this file ---
 
+// argon2-browser loads its WASM on first use, and after a failed load (e.g. a
+// network error) it keeps failing until the page is reloaded
+class Argon2Error extends Error {}
+const ARGON2_FAILED = 'Could not load or run the encryption code. Reload the page and try again.';
+
 function to_hex(buffer) {
     return Array.from(new Uint8Array(buffer), function(b) {
         return b.toString(16).padStart(2, '0');
@@ -229,15 +256,20 @@ async function derive_keys(password, token) {
     // Web Crypto runs off the main thread, so this overlaps with Argon2
     var id = crypto.subtle.digest('SHA-256', enc.encode('whisper v3 id:' + token));
     var params = get_argon2_params();
-    var result = await argon2.hash({
-        pass: password,
-        salt: token,
-        time: params.time,
-        mem: params.mem,
-        parallelism: params.par,
-        hashLen: ARGON2_HASH_LEN,
-        type: argon2.ArgonType.Argon2id
-    });
+    var result;
+    try {
+        result = await argon2.hash({
+            pass: password,
+            salt: token,
+            time: params.time,
+            mem: params.mem,
+            parallelism: params.par,
+            hashLen: ARGON2_HASH_LEN,
+            type: argon2.ArgonType.Argon2id
+        });
+    } catch (e) {
+        throw new Argon2Error(e && e.message);
+    }
     var master = await crypto.subtle.importKey(
         'raw', result.hash, 'HKDF', false, ['deriveBits', 'deriveKey']
     );
@@ -332,25 +364,38 @@ async function api_post(path, data) {
 
 // --- Create secret flow ---
 
+// true while a secret is being created: repeat submits are ignored, so a
+// double click doesn't upload a second secret
+var creating = false;
+
 async function new_link(event) {
     event.preventDefault();
+    if (creating) return;
     var password = document.getElementById('password').value;
     var secret_text = document.getElementById('secret_text').value;
     var secret_file = document.getElementById('secret_file');
     var expiration = document.getElementById('expiration').value;
     var secret_link = document.getElementById('secret_link');
+    var create_button = document.getElementById('create_secret');
 
     if (!secret_text && !secret_file.value) {
         secret_link.value = 'Please enter text or choose a file.';
         return;
     }
 
+    creating = true;
+    create_button.disabled = true;
     secret_link.value = 'Encrypting, please wait...';
 
     try {
         var plaintext;
         if (secret_file && secret_file.value != '') {
-            plaintext = await get_base64(secret_file);
+            try {
+                plaintext = await get_base64(secret_file);
+            } catch (e) {
+                secret_link.value = 'Could not read the file. Choose it again and retry.';
+                return;
+            }
         } else {
             plaintext = secret_text;
         }
@@ -372,24 +417,21 @@ async function new_link(event) {
             secret_link.value = response.result || 'Could not create link.';
         }
     } catch (e) {
-        secret_link.value = 'Could not create link.';
+        secret_link.value = e instanceof Argon2Error ? ARGON2_FAILED : 'Could not create link.';
+    } finally {
+        creating = false;
+        create_button.disabled = file_too_large(secret_file);
     }
 }
 
 // --- Retrieve secret flow ---
 
-function dataURL_to_blob(file_mime, file_contents) {
-    var ab = new ArrayBuffer(file_contents.length);
-    var ia = new Uint8Array(ab);
-    for (var i = 0; i < file_contents.length; i++) {
-        ia[i] = file_contents.charCodeAt(i);
-    }
-    return new Blob([ab], { type: file_mime });
-}
-
-function download_secret_file(decrypted, file_name, file_mime) {
-    var file_contents = atob(decrypted);
-    var blob = dataURL_to_blob(file_mime, file_contents);
+// Always application/octet-stream, whatever type the sender's file had. A
+// browser that ignores the download attribute (some in-app webviews) opens
+// the file instead, and an HTML or SVG file would then run as a page on
+// Whisper's origin.
+function download_secret_file(file_base64, file_name) {
+    var blob = new Blob([base64_to_uint8(file_base64)], { type: 'application/octet-stream' });
     var url = URL.createObjectURL(blob);
     var file_dl = document.createElement('a');
     file_dl.download = file_name;
@@ -399,12 +441,43 @@ function download_secret_file(decrypted, file_name, file_mime) {
     setTimeout(function() { URL.revokeObjectURL(url); }, 60000);
 }
 
+// A file secret is "filename:<name>," then the file's data URL. Office types
+// alone are 70+ characters, and files of unknown type can have an empty one
+// ("data:;base64,"). The type is only used to recognize a file.
+var FILE_SECRET = /^filename:(.+?),data:([-+.\w]+\/[-+.\w]+)?;base64,/;
+
+function show_secret(decrypted, output) {
+    var match = decrypted.substring(0, 1024).match(FILE_SECRET);
+    if (match) {
+        var file_name = safe_file_name(match[1]);
+        try {
+            download_secret_file(decrypted.slice(match[0].length), file_name);
+            output.value = 'Downloaded ' + file_name + '.';
+            return;
+        } catch (e) {
+            // not base64 after all: text that only looks like a file
+        }
+    }
+    // not copied automatically: clipboard managers and cross-device
+    // clipboard sync would pick it up. The copy button is right there.
+    output.value = decrypted;
+}
+
 async function get_data(event) {
     event.preventDefault();
+    var retrieve_button = document.getElementById('retrieve_secret');
+    // Disabled while a request is running, and for good once the secret is
+    // open: its token has left the address bar, so another try would fail
+    // and replace the secret on screen (a one-time secret can't be fetched
+    // again)
+    if (retrieve_button.disabled) return;
     var token = link_token();
+    if (!token) return;
     var password = document.getElementById('retrieve_password').value;
     var decrypted_text = document.getElementById('decrypted_text');
+    retrieve_button.disabled = true;
     decrypted_text.value = 'Decrypting, please wait...';
+    var opened = false;
 
     try {
         var keys = await derive_keys(password, token);
@@ -420,25 +493,15 @@ async function get_data(event) {
         }
 
         var decrypted = await decrypt_secret(response.encrypted_data, keys);
+        opened = true;
 
         // the link has done its job: take the token out of the address bar
         // and browser history
         history.replaceState(null, '', location.pathname + location.search);
-
-        // a file secret starts with "filename:<name>," then the file's data
-        // URL. Office types alone are 70+ characters, and files of unknown
-        // type can have an empty one ("data:;base64,").
-        var regex = /^filename:(.+?),data:([-+.\w]+\/[-+.\w]+)?;base64,/;
-        var match = decrypted.substring(0, 1024).match(regex);
-        if (match) {
-            download_secret_file(decrypted.replace(regex, ''), match[1],
-                match[2] || 'application/octet-stream');
-            decrypted_text.value = 'Downloaded ' + match[1] + '.';
-        } else {
-            decrypted_text.value = decrypted;
-            document.getElementById('retrieve_copybutton').click();
-        }
+        show_secret(decrypted, decrypted_text);
     } catch (e) {
-        decrypted_text.value = 'Error decrypting secret.';
+        decrypted_text.value = e instanceof Argon2Error ? ARGON2_FAILED : 'Error decrypting secret.';
+    } finally {
+        if (!opened) retrieve_button.disabled = false;
     }
 }

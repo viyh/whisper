@@ -2,11 +2,11 @@ version: '3'
 
 services:
   whisper:
-    image: viyh/whisper:0.5.0
+    image: viyh/whisper:0.5.1
     container_name: whisper
     restart: always
     environment:
-      LOG_LEVEL: DEBUG
+      LOG_LEVEL: INFO
     volumes:
       - /home/whisper/conf/config.yaml:/usr/src/app/config.yaml:ro
       - /home/whisper/data:/tmp/whisper

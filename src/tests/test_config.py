@@ -162,3 +162,38 @@ def test_create_rate_limit_defaults_to_30_and_can_be_turned_off(tmp_path):
 def test_create_rate_limit_rejects_invalid_values(tmp_path, bad):
     with pytest.raises(ConfigError):
         load_config(config_filenames=[_write(tmp_path, VALID_CONFIG + f"create_rate_limit: {bad}\n")])
+
+
+def _with(**settings):
+    """VALID_CONFIG with the given settings changed or added."""
+    lines = [
+        line for line in VALID_CONFIG.splitlines()
+        if line.split(":")[0] not in settings
+    ]
+    return "\n".join(lines + [f"{k}: {v}" for k, v in settings.items()]) + "\n"
+
+
+@pytest.mark.parametrize(
+    "setting",
+    ["storage_clean_interval", "max_data_size_kb", "argon2_time_cost",
+     "argon2_memory_cost", "argon2_parallelism"],
+)
+@pytest.mark.parametrize("bad", ["0", "-1", "'900'", "1.5", "true"])
+def test_numeric_settings_must_be_positive_integers(tmp_path, setting, bad):
+    """storage_clean_interval: 0 ran the cleaner nonstop, and a negative or
+    non-numeric value stopped it for good."""
+    with pytest.raises(ConfigError, match="positive integer"):
+        load_config(config_filenames=[_write(tmp_path, _with(**{setting: bad}))])
+
+
+def test_numeric_settings_accept_one(tmp_path):
+    cfg = load_config(config_filenames=[_write(tmp_path, _with(storage_clean_interval=1))])
+    assert cfg.storage_clean_interval == 1
+
+
+def test_argon2_memory_must_cover_parallelism(tmp_path):
+    """Argon2 needs at least 8 KB per lane; the browser would fail otherwise."""
+    with pytest.raises(ConfigError, match="argon2_memory_cost"):
+        load_config(config_filenames=[_write(tmp_path, _with(argon2_parallelism=4))])
+    ok = _with(argon2_parallelism=4, argon2_memory_cost=32)
+    assert load_config(config_filenames=[_write(tmp_path, ok)]).argon2_parallelism == 4

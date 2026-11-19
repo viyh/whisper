@@ -1,15 +1,28 @@
 # Docker Hardened Images (https://dhi.io) are free but need a Docker account:
 #   docker login dhi.io
 
-# Build stage: the -dev variant has a shell and pip for installing packages.
+# Build stage: the -dev variant has a shell for installing packages.
 FROM dhi.io/python:3.14-debian13-dev AS build
+
+# uv installs the packages, much faster than pip. Astral's own image, pinned
+# by digest as well so the tag can't be moved. It stays in this stage.
+COPY --from=ghcr.io/astral-sh/uv:0.13.9@sha256:d3b601f0c7b118bc1753febf7c41cc80981df678445e0254284eecf84db79a7d /uv /usr/local/bin/uv
+
+# Compile bytecode at install time, as pip does: the runtime stage can't
+# write it. The cache is a build cache mount, so it isn't in the image, and
+# packages are copied out of it rather than linked.
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_CACHE_DIR=/root/.cache/uv
 
 WORKDIR /usr/src/app
 
+# The image's own Python, so the virtualenv works as-is in the runtime stage.
+# uv doesn't put pip in the virtualenv.
 COPY src/requirements.txt ./
-RUN python3 -m venv /opt/venv \
-    && /opt/venv/bin/pip install --no-cache-dir -r requirements.txt \
-    && /opt/venv/bin/pip uninstall -y pip
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv venv /opt/venv --python /usr/bin/python3 \
+    && uv pip install --python /opt/venv/bin/python3 -r requirements.txt
 
 COPY src/ ./
 RUN rm -rf tests requirements*.txt config.yaml \

@@ -31,6 +31,8 @@ app_url_base: /
 trusted_proxy_count: 0
 
 # Wrong passwords allowed per secret before it is locked until it expires.
+# A locked secret's encrypted data is deleted, so raising this later doesn't
+# reopen it.
 # 0 turns the lock off (the per-IP limit of 10 attempts a minute still applies).
 max_failed_attempts: 10
 

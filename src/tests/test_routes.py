@@ -154,6 +154,36 @@ def test_failed_attempt_lock_is_configurable(client, app_module, monkeypatch):
     assert "locked" in _retrieve(client, sid).get_json()["result"].lower()
 
 
+def test_locking_wipes_the_ciphertext(client, app_module):
+    """A locked secret can never be opened, so only a record that answers
+    "locked" is kept, instead of the ciphertext for up to 30 days."""
+    _, sid = _create(client, expiration="1 hour")
+    for _ in range(9):
+        _retrieve(client, sid, BAD_AUTH)
+    assert app_module.store.get_secret(sid).data == "opaque-ciphertext"
+    assert _retrieve(client, sid, BAD_AUTH).get_json() == {"result": "Invalid password."}
+    stored = app_module.store.get_secret(sid)
+    assert (stored.data, stored.hash, stored.failed_attempts) == ("", "", 10)
+    answer = _retrieve(client, sid).get_json()
+    assert "locked" in answer["result"].lower() and "encrypted_data" not in answer
+
+
+def test_raising_the_limit_does_not_reopen_a_wiped_secret(client, app_module, monkeypatch):
+    _, sid = _create(client, expiration="1 hour")
+    for _ in range(10):
+        _retrieve(client, sid, BAD_AUTH)
+    monkeypatch.setitem(app_module.config, "max_failed_attempts", 20)
+    assert _retrieve(client, sid).get_json() == {"result": "Invalid password."}
+
+
+def test_secret_locked_by_an_older_version_is_wiped(client, app_module):
+    _, sid = _create(client, expiration="1 hour")
+    app_module.store.backend.secrets[sid].failed_attempts = 10  # locked, data still there
+    assert "locked" in _retrieve(client, sid).get_json()["result"].lower()
+    stored = app_module.store.get_secret(sid)
+    assert (stored.data, stored.hash) == ("", "")
+
+
 def test_failed_attempt_lock_can_be_turned_off(client, app_module, monkeypatch):
     monkeypatch.setitem(app_module.config, "max_failed_attempts", 0)
     _, sid = _create(client, expiration="1 hour")
@@ -207,6 +237,13 @@ def test_old_links_explain_instead_of_failing_silently(client):
     assert "updated" in old.get_json()["result"]
 
 
+def test_post_to_other_paths_is_not_found(client):
+    """Only old links get the "Whisper has been updated" answer."""
+    r = client.post("/" + "z" * 40, json={})
+    assert r.status_code == 404
+    assert r.get_json() == {"result": "Not found"}
+
+
 def test_other_paths_redirect_to_index(client):
     r = client.get("/" + "z" * 40)
     assert r.status_code == 302
@@ -223,6 +260,38 @@ def test_security_headers_on_pages_and_api(client):
         assert "'unsafe-inline'" not in csp
         assert "http" not in csp  # no third-party origins (no CDN)
         assert r.headers["Strict-Transport-Security"] == "max-age=63072000; includeSubDomains"
+        assert "form-action 'none'" in csp  # forms are never submitted natively
+        assert "base-uri 'none'" in csp
+        assert "blob:" not in csp
+        assert r.headers["Cross-Origin-Opener-Policy"] == "same-origin"
+        assert r.headers["Cross-Origin-Resource-Policy"] == "same-origin"
+
+
+def test_pages_and_api_answers_are_not_cached(client):
+    r, sid = _create(client, expiration="1 hour")
+    for resp in (client.get("/"), r, _retrieve(client, sid), client.get("/elb-status")):
+        assert resp.headers["Cache-Control"] == "no-store"
+    assert "no-store" not in client.get("/assets/style.css").headers.get("Cache-Control", "")
+
+
+def test_page_explains_when_scripts_or_https_are_missing(client):
+    html = client.get("/").get_data(as_text=True)
+    assert "<noscript>" in html and "needs JavaScript" in html
+    assert 'id="insecure_notice"' in html
+
+
+def test_secret_fields_are_never_submitted_or_spellchecked(client):
+    """Without name attributes a native form submit (scripts blocked or not
+    loaded) has nothing to put in the URL, and spellcheck="false" keeps
+    browsers' cloud spellcheckers from sending the text away."""
+    import re
+
+    html = client.get("/").get_data(as_text=True)
+    for field in re.findall(r"<(?:input|textarea|select)\b[^>]*>", html):
+        assert " name=" not in field, field
+    for field_id in ("secret_text", "password", "secret_link", "retrieve_password", "decrypted_text"):
+        tag = re.search(rf'<[^>]*id="{field_id}"[^>]*>', html).group(0)
+        assert 'spellcheck="false"' in tag and 'autocorrect="off"' in tag, tag
 
 
 def test_page_loads_no_third_party_assets(client):
