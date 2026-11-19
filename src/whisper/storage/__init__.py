@@ -80,6 +80,19 @@ class store:
         Returns True if the update was written, False otherwise."""
         return self.backend.update_secret(secret)
 
+    def record_failed_attempt(self, secret):
+        """Add a wrong password to the secret's failed_attempts count. Never
+        recreates a secret that was claimed in the meantime. Returns True if
+        the count was written."""
+        return self.backend.increment_failed_attempts(secret)
+
+    def increment_failed_attempts(self, secret):
+        """Backend default: a read-modify-write through update_secret, so two
+        wrong passwords at the same moment can count once (S3, GCS). Backends
+        that can, count atomically instead (local, memory)."""
+        secret.failed_attempts += 1
+        return self.update_secret(secret)
+
     def delete_secret(self, secret_id):
         """Delete a secret from the storage backend"""
         logger.info(f"Delete secret: {short_id(secret_id)}")

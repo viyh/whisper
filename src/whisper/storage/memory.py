@@ -47,6 +47,16 @@ class memory(store):
         logger.debug(f"Updating memory secret: {short_id(s.id)}")
         return True
 
+    def increment_failed_attempts(self, s):
+        """Count a wrong password atomically (under the lock)."""
+        with self._lock:
+            stored = self.secrets.get(s.id)
+            if not stored:
+                return False
+            stored.failed_attempts += 1
+            s.failed_attempts = stored.failed_attempts
+        return True
+
     def delete_secret(self, secret_id):
         logger.info(f"Deleting memory secret: {short_id(secret_id)}")
         with self._lock:

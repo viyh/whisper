@@ -57,7 +57,9 @@ class s3(store):
         self.client = boto3.client("s3")
 
     def _path(self, secret_id):
-        return os.path.join(self.config.bucket_path, f"{secret_id}.json")
+        # strip slashes like _list_prefix does, so "/secrets" stores secrets
+        # where the cleaner looks for them
+        return os.path.join(self.config.bucket_path.strip("/"), f"{secret_id}.json")
 
     def _list_prefix(self):
         path = self.config.bucket_path.strip("/")

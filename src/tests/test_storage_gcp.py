@@ -119,3 +119,13 @@ def test_delete_expired_falls_back_to_object_without_metadata(backend):
     ).encode()
     backend.delete_expired()
     backend.bucket.delete_blob.assert_called_once_with(f"secrets/{s.id}.json")
+
+
+@pytest.mark.parametrize("bucket_path", ["secrets", "/secrets", "/secrets/", "secrets/"])
+def test_secrets_are_stored_where_the_cleaner_looks(backend, bucket_path):
+    backend.config.bucket_path = bucket_path
+    assert backend._path(SID_FOR_PATHS) == f"secrets/{SID_FOR_PATHS}.json"
+    assert backend._path(SID_FOR_PATHS).startswith(backend._list_prefix())
+
+
+SID_FOR_PATHS = "c" * 64

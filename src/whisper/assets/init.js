@@ -11,11 +11,16 @@ function init_create_view() {
     // File selection
     document.getElementById('secret_file').addEventListener('change', function() {
         file_select();
-        var fileSize = this.files[0].size / 1000;
         var maxFileSizeKb = parseInt(document.getElementById('app-config').dataset.maxFileSizeKb || '100');
         var secretLink = document.getElementById('secret_link');
         var createSecret = document.getElementById('create_secret');
-        if (fileSize > maxFileSizeKb) {
+        // Cancel in the file picker can leave no file selected
+        if (!this.files || this.files.length === 0) {
+            createSecret.disabled = false;
+            secretLink.value = secretLink.defaultValue;
+            return;
+        }
+        if (this.files[0].size / 1000 > maxFileSizeKb) {
             createSecret.disabled = true;
             secretLink.value = 'Maximum file size is ' + maxFileSizeKb + ' KB.';
         } else {

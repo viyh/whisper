@@ -10,6 +10,9 @@ both as opaque 64-character hex strings, so these tests use fixed stand-ins.
 """
 
 import secrets
+import threading
+
+import pytest
 
 from whisper import CURRENT_SECRET_VERSION, auth_digest
 
@@ -219,7 +222,7 @@ def test_security_headers_on_pages_and_api(client):
         csp = r.headers["Content-Security-Policy"]
         assert "'unsafe-inline'" not in csp
         assert "http" not in csp  # no third-party origins (no CDN)
-        assert r.headers["Strict-Transport-Security"].startswith("max-age=63072000")
+        assert r.headers["Strict-Transport-Security"] == "max-age=63072000; includeSubDomains"
 
 
 def test_page_loads_no_third_party_assets(client):
@@ -270,3 +273,46 @@ def test_malformed_ids_are_not_logged(client, caplog):
     r = client.post("/retrieve", json={"id": "aa\nZZZZ" + "a" * 57, "auth": GOOD_AUTH})
     assert r.status_code == 400
     assert "ZZZZ" not in caplog.text
+
+
+@pytest.fixture
+def limiter_on(app_module):
+    """Turn the rate limiter on for one test, with fresh counters."""
+    app_module.limiter.reset()
+    app_module.limiter.enabled = True
+    yield
+    app_module.limiter.enabled = False
+    app_module.limiter.reset()
+
+
+def test_creating_secrets_is_rate_limited(client, app_module, limiter_on):
+    for _ in range(app_module.config.create_rate_limit):
+        assert _create(client)[0].status_code == 200
+    r, _ = _create(client)
+    assert r.status_code == 429
+    assert "try again later" in r.get_json()["result"]
+
+
+def test_create_rate_limit_can_be_turned_off(client, app_module, limiter_on, monkeypatch):
+    monkeypatch.setitem(app_module.config, "create_rate_limit", 0)
+    for _ in range(40):
+        assert _create(client)[0].status_code == 200
+
+
+def test_simultaneous_wrong_passwords_all_count(client, app_module):
+    """The lock can't be dodged by sending wrong passwords at the same moment."""
+    _, sid = _create(client, expiration="1 day")
+    s = app_module.store.get_secret(sid)
+    start = threading.Barrier(20)
+
+    def wrong_password():
+        start.wait()
+        app_module.store.record_failed_attempt(app_module.store.get_secret(sid))
+
+    threads = [threading.Thread(target=wrong_password) for _ in range(20)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert app_module.store.get_secret(sid).failed_attempts == 20
+    assert s.failed_attempts == 0  # callers' copies aren't touched

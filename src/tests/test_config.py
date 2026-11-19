@@ -128,3 +128,37 @@ def test_max_failed_attempts_can_be_set_or_turned_off(tmp_path):
 def test_max_failed_attempts_rejects_invalid_values(bad):
     with pytest.raises(ConfigError):
         check_max_failed_attempts(bad)
+
+
+@pytest.mark.parametrize("key", [
+    "'CHANGE_ME_TO_A_RANDOM_STRING_OF_32_OR_MORE_CHARACTERS'",  # the placeholder
+    "''",
+    "'   '",
+    "12345678901234567890123456789012345",  # YAML reads this as a number
+])
+def test_secret_key_must_be_a_real_string(tmp_path, key):
+    text = VALID_CONFIG.replace('"abcdefghijklmnopqrstuvwxyz_0123456"', key)
+    with pytest.raises(ConfigError) as e:
+        load_config(config_filenames=[_write(tmp_path, text)])
+    assert e.value.config_key == "secret_key"
+
+
+@pytest.mark.parametrize("given,expected", [
+    ("/", "/"), ("''", "/"), ("/whisper", "/whisper/"), ("whisper/", "/whisper/"),
+    ("/a/b/", "/a/b/"),
+])
+def test_app_url_base_gets_leading_and_trailing_slash(tmp_path, given, expected):
+    text = VALID_CONFIG.replace("app_url_base: /", f"app_url_base: {given}")
+    assert load_config(config_filenames=[_write(tmp_path, text)]).app_url_base == expected
+
+
+def test_create_rate_limit_defaults_to_30_and_can_be_turned_off(tmp_path):
+    assert load_config(config_filenames=[_write(tmp_path, VALID_CONFIG)]).create_rate_limit == 30
+    off = load_config(config_filenames=[_write(tmp_path, VALID_CONFIG + "create_rate_limit: 0\n")])
+    assert off.create_rate_limit == 0
+
+
+@pytest.mark.parametrize("bad", ["-1", "'30'", "true", "1.5"])
+def test_create_rate_limit_rejects_invalid_values(tmp_path, bad):
+    with pytest.raises(ConfigError):
+        load_config(config_filenames=[_write(tmp_path, VALID_CONFIG + f"create_rate_limit: {bad}\n")])
