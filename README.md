@@ -40,7 +40,7 @@ Whisper uses a layered security approach:
 - **Client-side encryption**: Secrets are encrypted with AES-256-GCM (Web Crypto API) before leaving the browser. The server never has access to plaintext data or passwords.
 - **The link and the password are both needed**: Each link ends in a random token after the `#`, which browsers never send to servers. The browser derives the encryption key from the password with Argon2id (WASM), salted with the token, and the server stores each secret under a hash of the token. The server, its storage and its logs can't decrypt a secret or tell which link it belongs to, and a copy of the storage is useless without the links, even with `secret_key`.
 - **One-time secrets**: Deleted atomically after retrieval -- concurrent requests cannot both succeed. Unread one-time secrets are deleted after 30 days.
-- **Rate limiting**: 10 attempts per minute per IP, plus a per-secret lock after 10 wrong passwords (`max_failed_attempts`). Behind a load balancer, set `trusted_proxy_count` (see [Running Behind a Proxy](#running-behind-a-proxy)).
+- **Rate limiting**: per IP, 10 attempts a minute to open secrets and 30 new secrets a minute (`create_rate_limit`), plus a per-secret lock after 10 wrong passwords (`max_failed_attempts`). Behind a load balancer, set `trusted_proxy_count` (see [Running Behind a Proxy](#running-behind-a-proxy)).
 - **Strict CSP**: No inline scripts or styles, and nothing is loaded from other sites.
 
 See [Security Details](#security-details) for the full cryptographic design.
@@ -52,14 +52,14 @@ See [Security Details](#security-details) for the full cryptographic design.
 export SECRET_KEY=$(head /dev/urandom | LC_ALL=C tr -dc 'A-Za-z0-9' | head -c 48)
 sed "s/CHANGE_ME_TO_A_RANDOM_STRING_OF_32_OR_MORE_CHARACTERS/$SECRET_KEY/" src/config.default.yaml > config.yaml
 
-# Build from source (optional, can also pull viyh/whisper:0.4.0).
+# Build from source (optional, can also pull viyh/whisper:0.5.0).
 # The base images need a free Docker account: docker login dhi.io
 # docker build -t viyh/whisper .
 
 # Run
 docker run -d --name whisper -p 8000:8000 \
     -v $(pwd)/config.yaml:/usr/src/app/config.yaml \
-    viyh/whisper:0.4.0
+    viyh/whisper:0.5.0
 ```
 
 Browse to http://localhost:8000
@@ -74,7 +74,7 @@ Copy `src/config.default.yaml` to `config.yaml` and customize. Mount it into the
 
 | Setting | Description |
 |---------|-------------|
-| `secret_key` | Server secret that keys the stored HMAC of each secret's auth token (see [Cryptographic Flow](#cryptographic-flow-v3)). Must be a unique random string of 32+ characters. **Change this from the default.** |
+| `secret_key` | Server secret that keys the stored HMAC of each secret's auth token (see [Cryptographic Flow](#cryptographic-flow-v3)). Must be a unique random string of 32+ characters. **Change this from the default:** Whisper won't start with the placeholder. |
 | `storage_class` | Storage backend class path (see [Storage Backends](#storage-backends)). |
 
 ### Optional Settings
@@ -86,11 +86,12 @@ Copy `src/config.default.yaml` to `config.yaml` and customize. Mount it into the
 | `max_data_size_kb` | `100` | Maximum upload size in KB. |
 | `app_listen_ip` | `0.0.0.0` | Listen address for the development server (`python app.py`) only. |
 | `app_port` | `5000` | Port for the development server only. In the container, see `WEB_PORT`. |
-| `app_url_base` | `/` | URL base path (e.g., `/whisper/` for subpath hosting). |
+| `app_url_base` | `/` | URL base path (e.g., `/whisper/` for subpath hosting). A missing leading or trailing `/` is added. |
 | `argon2_time_cost` | `5` | Argon2id time cost for the key derivation, which runs in the browser. Higher = slower to create and open secrets, and slower to guess passwords. Changing any Argon2id setting makes unexpired secrets unopenable. |
 | `argon2_memory_cost` | `131072` | Argon2id memory cost in KB (131072 = 128 MB). |
 | `argon2_parallelism` | `1` | Argon2id parallelism. |
 | `max_failed_attempts` | `10` | Wrong passwords allowed per secret before it locks until it expires. `0` turns the lock off; the per-IP rate limit still applies. |
+| `create_rate_limit` | `30` | Secrets each IP address can create per minute. `0` turns the limit off. |
 | `trusted_proxy_count` | `0` | Number of `X-Forwarded-For` entries added by proxies in front of the container. See [Running Behind a Proxy](#running-behind-a-proxy). |
 
 ### Environment Variables
@@ -283,6 +284,7 @@ Storage backends must subclass `store` and implement:
 | `delete_secret(secret_id)` | Delete a secret. |
 | `update_secret(s)` | Save changes to an existing secret; return `False` without writing if it no longer exists (never recreates a claimed secret). |
 | `claim_secret(secret_id)` | Atomically delete and return `True` if it existed (for one-time secrets). |
+| `increment_failed_attempts(s)` | Optional. Add one to the stored `failed_attempts`; return `False` if the secret no longer exists. The default does it through `update_secret`; override it to count atomically. |
 | `delete_expired()` | Iterate stored secrets and delete any where `is_expired()` returns `True`. |
 
 See `src/whisper/storage/memory.py` for a minimal example.
@@ -303,11 +305,11 @@ The image builds on [Docker Hardened Images](https://dhi.io), which are free but
 
 ```bash
 # Standard build
-docker build -t whisper:0.4.0 .
+docker build -t whisper:0.5.0 .
 
 # Cross-platform build
 docker buildx build --platform=linux/amd64,linux/arm64 \
-    -t whisper:0.4.0 .
+    -t whisper:0.5.0 .
 ```
 
 ### Tech Stack

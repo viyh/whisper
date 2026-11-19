@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+**Breaking:** Whisper now refuses to start while `secret_key` is still the placeholder from `config.default.yaml`, empty, or not a string (e.g. an unquoted number); set a unique random string. Secrets and links from 0.4.0 keep working.
+
+### Security
+* Rate limit on creating secrets: 30 a minute per IP by default (`create_rate_limit`, 0 turns it off). Unread one-time secrets are kept for 30 days, so unlimited creates could fill storage.
+* Whisper no longer starts with the placeholder `secret_key` (a publicly known HMAC key), an empty one, or one that isn't a string. A short key still only warns.
+* Wrong passwords are counted atomically in the local and in-memory backends, so simultaneous attempts can't get past `max_failed_attempts`.
+* Local backend: the storage directory is created owner-only (0700), since a listing shows every stored secret's ID.
+* HSTS no longer sends `preload`, which opts a whole domain into browsers' preload list.
+
+### Fixed
+* File secrets with a long name or an Office file type (e.g. `.docx`) now download instead of showing as base64 text, and so do files of unknown type.
+* Local backend: reads and writes share a lock, so a request or the cleaner never sees a half-written file. The cleaner leaves an unreadable file alone for a minute instead of deleting it right away, and a file deleted by a concurrent request no longer raises an error.
+* S3 and GCS: a `bucket_path` with a leading `/` stored secrets where the cleaner didn't look, so expired secrets were never deleted.
+* `app_url_base` without a leading or trailing `/` (e.g. `/whisper`) built broken routes. It is now normalized.
+* Cancelling the file picker after choosing a file that's too large left the Create button disabled.
+* An error page from a proxy (e.g. 502 or 413), or an empty or cut-off response, showed "Error decrypting secret."; it now says what happened.
+* Release the downloaded file's object URL.
+
+### Changed
+* Remove a redundant request body read when creating a secret.
+
 ## [0.4.0] - 2026-11-18
 
 **Breaking:** new secret and link format (v3). Links and secrets made by earlier versions can't be opened: old links show a notice instead, and their stored secrets are deleted when they expire.

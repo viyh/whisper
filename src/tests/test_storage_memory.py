@@ -106,3 +106,23 @@ def test_delete_expired_leaves_one_time_within_grace_window(backend):
     backend.update_secret(ot)  # backend stores copies, so persist the change
     backend.delete_expired()
     assert backend.get_secret(ot.id) is False
+
+
+def test_failed_attempts_count_atomically(backend):
+    import threading
+
+    s = _make_secret()
+    backend.set_secret(s)
+    start = threading.Barrier(20)
+
+    def wrong_password():
+        start.wait()
+        assert backend.increment_failed_attempts(backend.get_secret(s.id)) is True
+
+    threads = [threading.Thread(target=wrong_password) for _ in range(20)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert backend.get_secret(s.id).failed_attempts == 20
+    assert backend.increment_failed_attempts(_make_secret()) is False  # not stored
