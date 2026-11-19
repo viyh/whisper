@@ -143,3 +143,79 @@ def test_delete_secret_tolerates_a_file_that_is_already_gone(backend, monkeypatc
     assert backend.claim_secret(s.id) is True
     monkeypatch.setattr(os.path, "exists", lambda p: True)  # lose the race
     assert backend.delete_secret(s.id) is True
+
+
+def test_claim_leaves_no_file_behind(backend):
+    """Claims used to rename to .claimed first; a crash in between left the
+    secret on disk where the cleaner never looked."""
+    s = _make_secret("One time use")
+    backend.set_secret(s)
+    assert backend.claim_secret(s.id) is True
+    assert os.listdir(backend.config.path) == []
+
+
+def test_rewrite_replaces_the_file_whole(backend):
+    s = _make_secret()
+    backend.set_secret(s)
+    s.failed_attempts = 2
+    assert backend.update_secret(s) is True
+    path = os.path.join(backend.config.path, f"{s.id}.json")
+    assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
+    assert os.listdir(backend.config.path) == [f"{s.id}.json"]
+
+
+def test_rewrite_keeps_the_old_file_if_writing_fails(backend, monkeypatch):
+    """A crash or full disk mid-write used to leave a cut-off secret."""
+    import json
+
+    s = _make_secret()
+    backend.set_secret(s)
+
+    def disk_full(obj, fp):
+        fp.write('{"id": "')
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(json, "dump", disk_full)
+    s.failed_attempts = 1
+    with pytest.raises(OSError):
+        backend.update_secret(s)
+    monkeypatch.undo()
+    assert backend.get_secret(s.id).failed_attempts == 0
+    assert os.listdir(backend.config.path) == [f"{s.id}.json"]
+
+
+@pytest.mark.parametrize("suffix", [".tmp", ".claimed"])
+def test_cleaner_removes_old_leftover_files(backend, suffix):
+    path = os.path.join(backend.config.path, secrets.token_hex(32) + ".json" + suffix)
+    foreign = os.path.join(backend.config.path, "notes.json" + suffix)
+    for p in (path, foreign):
+        with open(p, "w") as f:
+            f.write("{}")
+    backend.delete_expired()
+    assert os.path.exists(path)  # may still be in use
+    for p in (path, foreign):
+        old = os.path.getmtime(p) - 120
+        os.utime(p, (old, old))
+    backend.delete_expired()
+    assert not os.path.exists(path)
+    assert os.path.exists(foreign)  # not named after a secret ID
+
+
+@pytest.mark.parametrize("content", ["null", "[]", "123", '"text"'])
+def test_a_file_that_is_not_an_object_does_not_stop_cleanup(backend, content):
+    """It used to raise TypeError: a 500 on read, and every cleanup run
+    stopped at that file."""
+    sid = secrets.token_hex(32)
+    path = os.path.join(backend.config.path, f"{sid}.json")
+    with open(path, "w") as f:
+        f.write(content)
+    assert backend.get_secret(sid) is False
+    expired = _make_secret()
+    expired.create_date -= 7200
+    expired.expire_date -= 7200
+    backend.set_secret(expired)
+    old = os.path.getmtime(path) - 120
+    os.utime(path, (old, old))
+    backend.delete_expired()
+    assert not os.path.exists(path)
+    assert backend.get_secret(expired.id) is False

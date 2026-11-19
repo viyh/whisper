@@ -1,12 +1,12 @@
 import json
 import logging
-import os
+import posixpath
 
 import boto3
 from botocore.exceptions import ClientError
 
 from whisper import secret, short_id
-from whisper.storage import store
+from whisper.storage import CAS_ATTEMPTS, store
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +21,10 @@ _GONE_OR_CHANGED = frozenset(
 _WRITE_REFUSED = frozenset(
     {"412", "PreconditionFailed", "409", "ConditionalRequestConflict"}
 )
+
+
+#: _dates_from_tags result for an object that was deleted after the listing
+_GONE = object()
 
 
 def _error_code(e):
@@ -43,7 +47,9 @@ class s3(store):
     one-time claim deletes with ``IfMatch`` on the ETag so exactly one caller
     wins (plain S3 deletes are idempotent and would let every concurrent
     caller "win"), and updates write with ``IfMatch`` so a claimed secret is
-    never recreated.
+    never recreated. Wrong passwords are counted with a compare-and-swap
+    against the ETag of the copy that was read, and a claim that loses to a
+    wrong-password write retries.
 
     botocore retries transient errors; other errors propagate. The cleaner
     thread logs and survives errors raised from ``delete_expired``.
@@ -58,8 +64,8 @@ class s3(store):
 
     def _path(self, secret_id):
         # strip slashes like _list_prefix does, so "/secrets" stores secrets
-        # where the cleaner looks for them
-        return os.path.join(self.config.bucket_path.strip("/"), f"{secret_id}.json")
+        # where the cleaner looks for them. Object keys always use "/".
+        return posixpath.join(self.config.bucket_path.strip("/"), f"{secret_id}.json")
 
     def _list_prefix(self):
         path = self.config.bucket_path.strip("/")
@@ -80,24 +86,29 @@ class s3(store):
         s = secret(secret_id)
         if not s.check_id():
             return False
-        path = self._path(s.id)
         logger.debug(f"Reading S3 secret: {short_id(s.id)}")
+        return self._read(s.id)[0]
+
+    def _read(self, secret_id):
+        """The stored secret and the ETag it was read with, or (False, None)
+        if it is missing or unreadable."""
         try:
-            raw = self.client.get_object(Bucket=self.config.bucket_name, Key=path)[
-                "Body"
-            ].read()
+            response = self.client.get_object(
+                Bucket=self.config.bucket_name, Key=self._path(secret_id)
+            )
+            raw = response["Body"].read()
         except ClientError as e:
             if _gone_or_changed(e):
-                return False
+                return False, None
             raise
         s = secret()
         try:
             if not s.load_from_dict(json.loads(raw)):
-                return False
+                return False, None
         except ValueError as e:
             logger.error(f"Could not parse S3 secret {short_id(secret_id)}: {e}")
-            return False
-        return s if s.check_id() else False
+            return False, None
+        return (s, response.get("ETag")) if s.check_id() else (False, None)
 
     def _upload(self, s, **conditions):
         self.client.put_object(
@@ -147,21 +158,55 @@ class s3(store):
         )
         return True
 
-    def claim_secret(self, secret_id):
-        """Atomically claim a one-time secret by deleting with ETag match."""
-        path = self._path(secret_id)
-        etag = self._etag(path)
-        if etag is None:
+    def increment_failed_attempts(self, s):
+        """Count a wrong password with a compare-and-swap: write the stored
+        copy plus one, pinned to the ETag it was read with. If another write
+        got in first, read again and retry, so simultaneous wrong passwords
+        each count and nothing written in between (e.g. a wipe) is undone."""
+        if not s.check_id():
             return False
-        try:
-            self.client.delete_object(
-                Bucket=self.config.bucket_name, Key=path, IfMatch=etag
-            )
-        except ClientError as e:
-            if _gone_or_changed(e):
+        for _ in range(CAS_ATTEMPTS):
+            stored, etag = self._read(s.id)
+            if not stored or etag is None:
                 return False
-            raise
-        return True
+            stored.failed_attempts += 1
+            try:
+                self._upload(stored, IfMatch=etag)
+            except ClientError as e:
+                if _error_code(e) in _WRITE_REFUSED:
+                    continue  # changed since the read
+                if _gone_or_changed(e):
+                    return False  # claimed or deleted since the read
+                raise
+            s.failed_attempts = stored.failed_attempts
+            return True
+        logger.warning(f"Too many concurrent writes, wrong password not counted: {short_id(s.id)}")
+        return False
+
+    def claim_secret(self, secret_id):
+        """Atomically claim a one-time secret by deleting it pinned to its
+        ETag, so exactly one caller wins. If a wrong-password write changed
+        the object in between, it is still there to claim: look again."""
+        if not secret(secret_id).check_id():
+            return False
+        path = self._path(secret_id)
+        for _ in range(CAS_ATTEMPTS):
+            etag = self._etag(path)
+            if etag is None:
+                return False
+            try:
+                self.client.delete_object(
+                    Bucket=self.config.bucket_name, Key=path, IfMatch=etag
+                )
+            except ClientError as e:
+                if _error_code(e) in _WRITE_REFUSED:
+                    continue  # changed since the lookup
+                if _gone_or_changed(e):
+                    return False
+                raise
+            return True
+        logger.warning(f"Too many concurrent writes, claim given up: {short_id(secret_id)}")
+        return False
 
     def delete_expired(self):
         pages = self.client.get_paginator("list_objects_v2").paginate(
@@ -170,7 +215,7 @@ class s3(store):
         for page in pages:
             for obj in page.get("Contents", []):
                 key = obj["Key"]
-                secret_id, ext = os.path.splitext(os.path.basename(key))
+                secret_id, ext = posixpath.splitext(posixpath.basename(key))
                 # only touch objects that are exactly <bucket_path>/<id>.json
                 if ext != ".json" or key != self._path(secret_id):
                     continue
@@ -178,9 +223,12 @@ class s3(store):
                 if not s.check_id():
                     continue
                 dates = self._dates_from_tags(key)
+                if dates is _GONE:
+                    # claimed or deleted since the listing: nothing to do
+                    continue
                 if dates is None:
-                    # no usable tags (missing, or object just deleted): fall
-                    # back to reading the dates from the object itself
+                    # no usable tags: fall back to reading the dates from the
+                    # object itself
                     stored = self.get_secret(secret_id)
                     if not stored:
                         logger.warning(f"Skipping unreadable S3 secret: {short_id(secret_id)}")
@@ -191,13 +239,15 @@ class s3(store):
                     self.delete_secret(secret_id)
 
     def _dates_from_tags(self, path):
+        """(create_date, expire_date) from the object's tags, None if they
+        are missing or invalid, or _GONE if the object no longer exists."""
         try:
             tagset = self.client.get_object_tagging(
                 Bucket=self.config.bucket_name, Key=path
             ).get("TagSet", [])
         except ClientError as e:
             if _gone_or_changed(e):
-                return None
+                return _GONE
             raise
         tags = {tag["Key"]: tag["Value"] for tag in tagset}
         try:

@@ -43,7 +43,7 @@ Whisper uses a layered security approach:
 - **Rate limiting**: per IP, 10 attempts a minute to open secrets and 30 new secrets a minute (`create_rate_limit`), plus a per-secret lock after 10 wrong passwords (`max_failed_attempts`). Behind a load balancer, set `trusted_proxy_count` (see [Running Behind a Proxy](#running-behind-a-proxy)).
 - **Strict CSP**: No inline scripts or styles, and nothing is loaded from other sites.
 
-See [Security Details](#security-details) for the full cryptographic design.
+See [Security Details](#security-details) for the full cryptographic design, and [SECURITY.md](SECURITY.md#what-whisper-cant-protect-against) for what it can't protect against.
 
 ## Quick Start
 
@@ -52,14 +52,14 @@ See [Security Details](#security-details) for the full cryptographic design.
 export SECRET_KEY=$(head /dev/urandom | LC_ALL=C tr -dc 'A-Za-z0-9' | head -c 48)
 sed "s/CHANGE_ME_TO_A_RANDOM_STRING_OF_32_OR_MORE_CHARACTERS/$SECRET_KEY/" src/config.default.yaml > config.yaml
 
-# Build from source (optional, can also pull viyh/whisper:0.5.0).
+# Build from source (optional, can also pull viyh/whisper:0.5.1).
 # The base images need a free Docker account: docker login dhi.io
 # docker build -t viyh/whisper .
 
 # Run
 docker run -d --name whisper -p 8000:8000 \
     -v $(pwd)/config.yaml:/usr/src/app/config.yaml \
-    viyh/whisper:0.5.0
+    viyh/whisper:0.5.1
 ```
 
 Browse to http://localhost:8000
@@ -74,7 +74,7 @@ Copy `src/config.default.yaml` to `config.yaml` and customize. Mount it into the
 
 | Setting | Description |
 |---------|-------------|
-| `secret_key` | Server secret that keys the stored HMAC of each secret's auth token (see [Cryptographic Flow](#cryptographic-flow-v3)). Must be a unique random string of 32+ characters. **Change this from the default:** Whisper won't start with the placeholder. |
+| `secret_key` | Server secret that keys the stored HMAC of each secret's auth token (see [Cryptographic Flow](#cryptographic-flow-v3)). Use a unique random string of 32+ characters; a shorter one starts with a warning. **Change this from the default:** Whisper won't start with the placeholder. |
 | `storage_class` | Storage backend class path (see [Storage Backends](#storage-backends)). |
 
 ### Optional Settings
@@ -82,7 +82,7 @@ Copy `src/config.default.yaml` to `config.yaml` and customize. Mount it into the
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `storage_config` | `{}` | Backend-specific settings (bucket name, path, etc.) |
-| `storage_clean_interval` | `900` | Seconds between expired secret cleanup runs. |
+| `storage_clean_interval` | `900` | Seconds between expired secret cleanup runs (at least 1). |
 | `max_data_size_kb` | `100` | Maximum upload size in KB. |
 | `app_listen_ip` | `0.0.0.0` | Listen address for the development server (`python app.py`) only. |
 | `app_port` | `5000` | Port for the development server only. In the container, see `WEB_PORT`. |
@@ -90,7 +90,7 @@ Copy `src/config.default.yaml` to `config.yaml` and customize. Mount it into the
 | `argon2_time_cost` | `5` | Argon2id time cost for the key derivation, which runs in the browser. Higher = slower to create and open secrets, and slower to guess passwords. Changing any Argon2id setting makes unexpired secrets unopenable. |
 | `argon2_memory_cost` | `131072` | Argon2id memory cost in KB (131072 = 128 MB). |
 | `argon2_parallelism` | `1` | Argon2id parallelism. |
-| `max_failed_attempts` | `10` | Wrong passwords allowed per secret before it locks until it expires. `0` turns the lock off; the per-IP rate limit still applies. |
+| `max_failed_attempts` | `10` | Wrong passwords allowed per secret before it locks until it expires. A locked secret's encrypted data is deleted, so raising this later doesn't reopen it. `0` turns the lock off; the per-IP rate limit still applies. |
 | `create_rate_limit` | `30` | Secrets each IP address can create per minute. `0` turns the limit off. |
 | `trusted_proxy_count` | `0` | Number of `X-Forwarded-For` entries added by proxies in front of the container. See [Running Behind a Proxy](#running-behind-a-proxy). |
 
@@ -268,7 +268,7 @@ For pre-0.2.0 (v1) links, check out the [`release/0.1.0_to_0.2.0`](../../tree/re
 
 ### Rate Limiting
 
-The default in-memory rate limiter (`storage_uri="memory://"`) keeps state in the container's single gunicorn process. With multiple containers or instances, each one enforces limits independently. For shared rate-limit state across workers, configure a Redis backend via [flask-limiter](https://flask-limiter.readthedocs.io/).
+The default in-memory rate limiter (`storage_uri="memory://"`) keeps state in the container's single gunicorn process. With multiple containers or instances, each one enforces limits independently. The counts also reset when the container restarts, which on Cloud Run includes every cold start after scaling to zero. For shared rate-limit state across workers, configure a Redis backend via [flask-limiter](https://flask-limiter.readthedocs.io/).
 
 ## Development
 
@@ -305,11 +305,11 @@ The image builds on [Docker Hardened Images](https://dhi.io), which are free but
 
 ```bash
 # Standard build
-docker build -t whisper:0.5.0 .
+docker build -t whisper:0.5.1 .
 
 # Cross-platform build
 docker buildx build --platform=linux/amd64,linux/arm64 \
-    -t whisper:0.5.0 .
+    -t whisper:0.5.1 .
 ```
 
 ### Tech Stack
