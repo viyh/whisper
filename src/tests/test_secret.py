@@ -4,6 +4,8 @@ import hashlib
 import hmac
 import time
 
+import pytest
+
 from whisper import (
     CURRENT_SECRET_VERSION,
     auth_digest,
@@ -141,3 +143,21 @@ def test_load_from_dict_accepts_leftover_v2_records():
     assert s.check_id() is True
     assert s.is_expired()
     assert s.check_auth(AUTH, KEY) is False
+
+
+@pytest.mark.parametrize("damaged", [None, [], 123, "text"])
+def test_load_from_dict_rejects_json_that_is_not_an_object(damaged):
+    assert secret().load_from_dict(damaged) is False
+
+
+@pytest.mark.parametrize(
+    "expiration,dates",
+    [("1 hour", {"expire_date": None}), ("1 hour", {"expire_date": 0}),
+     ("1 hour", {"expire_date": "soon"}), ("One time use", {"create_date": None})],
+)
+def test_is_expired_treats_damaged_dates_as_expired(expiration, dates):
+    """A damaged record is never served, and the cleaner removes it."""
+    s = _make(expiration)
+    for name, value in dates.items():
+        setattr(s, name, value)
+    assert s.is_expired() is True

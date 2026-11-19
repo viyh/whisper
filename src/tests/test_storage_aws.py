@@ -68,12 +68,26 @@ def test_claim_uses_conditional_delete(backend):
     assert backend.claim_secret(SID) is True
 
 
-def test_claim_loses_race_on_precondition_failed(backend):
+def test_claim_loses_race_to_another_claim(backend):
     backend.stub.add_response("head_object", {"ETag": '"abc"'}, {"Bucket": BUCKET, "Key": KEY})
     backend.stub.add_client_error(
         "delete_object", service_error_code="PreconditionFailed", http_status_code=412
     )
+    backend.stub.add_client_error("head_object", service_error_code="404", http_status_code=404)
     assert backend.claim_secret(SID) is False
+
+
+def test_claim_survives_a_wrong_password_write_in_between(backend):
+    """The secret is still there, just with a new ETag: claim it."""
+    backend.stub.add_response("head_object", {"ETag": '"abc"'}, {"Bucket": BUCKET, "Key": KEY})
+    backend.stub.add_client_error(
+        "delete_object", service_error_code="PreconditionFailed", http_status_code=412
+    )
+    backend.stub.add_response("head_object", {"ETag": '"def"'}, {"Bucket": BUCKET, "Key": KEY})
+    backend.stub.add_response(
+        "delete_object", {}, {"Bucket": BUCKET, "Key": KEY, "IfMatch": '"def"'}
+    )
+    assert backend.claim_secret(SID) is True
 
 
 def test_claim_missing_object(backend):
@@ -176,3 +190,91 @@ def test_secrets_are_stored_where_the_cleaner_looks(backend, bucket_path):
     backend.config.bucket_path = bucket_path
     assert backend._path(SID) == KEY
     assert backend._path(SID).startswith(backend._list_prefix())
+
+
+def test_delete_expired_skips_a_secret_claimed_since_the_listing(backend, caplog):
+    """No "unreadable" warning, and no further calls for it."""
+    key = f"secrets/{SID}.json"
+    backend.stub.add_response("list_objects_v2", {"IsTruncated": False, "Contents": [{"Key": key}]})
+    backend.stub.add_client_error("get_object_tagging", service_error_code="NoSuchKey", http_status_code=404)
+    with caplog.at_level("WARNING"):
+        backend.delete_expired()
+    assert not caplog.records
+
+
+def _body(s, **changes):
+    import json
+
+    return json.dumps(dict(s.__dict__, **changes)).encode()
+
+
+def _stored(s, etag, **changes):
+    import io
+
+    from botocore.response import StreamingBody
+
+    body = _body(s, **changes)
+    return {"Body": StreamingBody(io.BytesIO(body), len(body)), "ETag": etag}
+
+
+def _put_params(s, etag, **changes):
+    return {"Bucket": BUCKET, "Key": f"secrets/{s.id}.json", "Body": _body(s, **changes),
+            "ContentType": "application/json", "Tagging": ANY, "IfMatch": etag}
+
+
+def test_wrong_password_count_is_a_compare_and_swap(backend):
+    s = _make_secret()
+    backend.stub.add_response("get_object", _stored(s, '"v1"', failed_attempts=2))
+    backend.stub.add_response("put_object", {}, _put_params(s, '"v1"', failed_attempts=3))
+    assert backend.increment_failed_attempts(s) is True
+    assert s.failed_attempts == 3
+
+
+def test_wrong_password_count_retries_and_keeps_other_writes(backend):
+    """Another write got in between (more wrong passwords and a wipe): count
+    on top of it instead of writing the stale copy back."""
+    s = _make_secret()
+    backend.stub.add_response("get_object", _stored(s, '"v1"', failed_attempts=2))
+    backend.stub.add_client_error("put_object", service_error_code="PreconditionFailed", http_status_code=412)
+    backend.stub.add_response("get_object", _stored(s, '"v2"', failed_attempts=10, data="", hash=""))
+    backend.stub.add_response(
+        "put_object", {}, _put_params(s, '"v2"', failed_attempts=11, data="", hash="")
+    )
+    assert backend.increment_failed_attempts(s) is True
+    assert s.failed_attempts == 11
+
+
+@pytest.mark.parametrize("gone_at", ["get_object", "put_object"])
+def test_wrong_password_count_for_a_claimed_secret(backend, gone_at):
+    s = _make_secret()
+    if gone_at == "put_object":
+        backend.stub.add_response("get_object", _stored(s, '"v1"'))
+    backend.stub.add_client_error(gone_at, service_error_code="NoSuchKey", http_status_code=404)
+    assert backend.increment_failed_attempts(s) is False
+
+
+def test_wrong_password_count_gives_up_after_repeated_conflicts(backend, caplog):
+    from whisper.storage import CAS_ATTEMPTS
+
+    s = _make_secret()
+    for n in range(CAS_ATTEMPTS):
+        backend.stub.add_response("get_object", _stored(s, f'"v{n}"'))
+        backend.stub.add_client_error("put_object", service_error_code="PreconditionFailed", http_status_code=412)
+    with caplog.at_level("WARNING"):
+        assert backend.increment_failed_attempts(s) is False
+    assert "Too many concurrent writes" in caplog.text
+
+
+def test_claim_gives_up_after_repeated_conflicts(backend, caplog):
+    from whisper.storage import CAS_ATTEMPTS
+
+    for n in range(CAS_ATTEMPTS):
+        backend.stub.add_response("head_object", {"ETag": f'"v{n}"'}, {"Bucket": BUCKET, "Key": KEY})
+        backend.stub.add_client_error("delete_object", service_error_code="PreconditionFailed", http_status_code=412)
+    with caplog.at_level("WARNING"):
+        assert backend.claim_secret(SID) is False
+    assert "Too many concurrent writes" in caplog.text
+
+
+def test_claim_rejects_an_invalid_id(backend):
+    assert backend.claim_secret("../other") is False  # no S3 call stubbed

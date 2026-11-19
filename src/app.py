@@ -27,7 +27,7 @@ from whisper import (
 from whisper.log_redaction import install_redaction
 from whisper.storage import store
 
-__version__ = "0.5.0"
+__version__ = "0.5.1"
 
 app = Flask("whisper")
 
@@ -78,6 +78,8 @@ VALID_EXPIRATIONS = {"One time use", "1 hour", "1 day", "1 week"}
 #     assets/vendor and served from 'self', so no CDN is trusted or contacted.
 #   - style-src: 'self' only. Tooltips are pure CSS and nothing sets inline
 #     styles, so 'unsafe-inline' is not needed.
+#   - form-action 'none': the forms are only ever handled by JavaScript. If the
+#     scripts don't run, the browser can't submit them natively instead.
 #   - HSTS: Whisper's threat model assumes HTTPS termination in front of this
 #     container. Browsers ignore HSTS on plain-HTTP responses, so local
 #     development over http://localhost is unaffected. No "preload": that
@@ -92,13 +94,15 @@ SECURITY_HEADERS = {
         "default-src 'none'; "
         "script-src 'self' 'wasm-unsafe-eval'; "
         "style-src 'self'; "
-        "img-src 'self' data: blob:; "
+        "img-src 'self' data:; "
         "connect-src 'self'; "
         "frame-ancestors 'none'; "
-        "base-uri 'self'; "
-        "form-action 'self';"
+        "base-uri 'none'; "
+        "form-action 'none';"
     ),
     "Strict-Transport-Security": "max-age=63072000; includeSubDomains",
+    "Cross-Origin-Opener-Policy": "same-origin",
+    "Cross-Origin-Resource-Policy": "same-origin",
 }
 
 
@@ -106,6 +110,11 @@ SECURITY_HEADERS = {
 def add_security_headers(response):
     for name, value in SECURITY_HEADERS.items():
         response.headers.setdefault(name, value)
+    # Keep the page and API answers out of HTTP caches. Most browsers also
+    # leave no-store pages out of the back/forward cache, so an opened secret
+    # isn't restored by Back. Assets stay cacheable.
+    if request.endpoint != "send_assets":
+        response.headers.setdefault("Cache-Control", "no-store")
     return response
 
 
@@ -205,6 +214,10 @@ def retrieve_secret():
     max_failed = config.max_failed_attempts
     if max_failed and s.failed_attempts >= max_failed:
         app.logger.info(f"[{request.remote_addr}] Secret locked: {short_id(s.id)}")
+        if s.data or s.hash:
+            # locked by a version before 0.5.1, or the wipe lost a race
+            # with another write
+            store.wipe_secret(s.id)
         return jsonify({"result": "This secret has been locked due to too many failed attempts."})
 
     if not s.check_auth(data["auth"], config.secret_key):
@@ -212,6 +225,9 @@ def retrieve_secret():
         if max_failed:
             # never recreates a secret claimed by a concurrent request
             store.record_failed_attempt(s)
+            if s.failed_attempts >= max_failed:
+                # it can never be opened now, so drop the ciphertext
+                store.wipe_secret(s.id)
         return jsonify({"result": "Invalid password."})
 
     # for one-time secrets, atomically claim before returning data
@@ -227,7 +243,9 @@ def retrieve_secret():
 def old_link(secret_id):
     """Links from before 0.4.0 (/<40 hex characters>) can't be opened."""
     if request.method == "POST":
-        # a page loaded before an upgrade
+        if not is_legacy_secret_id(secret_id):
+            return jsonify({"result": "Not found"}), 404
+        # a page loaded before an upgrade, opening an old link
         return jsonify({"result": "Whisper has been updated. This link can no longer be opened."}), 410
     if is_legacy_secret_id(secret_id):
         return redirect(url_for("new_secret", old_link="1"))

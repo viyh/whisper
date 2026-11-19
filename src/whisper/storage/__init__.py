@@ -6,6 +6,10 @@ from whisper import check_config, class_loader, secret, short_id
 
 logger = logging.getLogger(__name__)
 
+#: How often S3 and GCS retry a conditional write or delete that another
+#: write got to first (a compare-and-swap), before giving up
+CAS_ATTEMPTS = 5
+
 
 class store_cleaner:
     """Storage cleaner class, deletes expired secrets by running a periodic
@@ -86,10 +90,29 @@ class store:
         the count was written."""
         return self.backend.increment_failed_attempts(secret)
 
+    def wipe_secret(self, secret_id):
+        """Blank a locked secret's ciphertext and auth hash. It can never be
+        opened again, so only what the "locked" answer needs is kept: the
+        record, which also keeps the ID taken, its dates and its
+        failed_attempts. Never recreates a secret claimed in the meantime.
+        Returns True if the secret is wiped."""
+        s = self.backend.get_secret(secret_id)
+        if not isinstance(s, secret) or not s.check_id():
+            return False
+        if not s.data and not s.hash:
+            return True
+        s.data = ""
+        s.hash = ""
+        if not self.backend.update_secret(s):
+            return False
+        logger.info(f"Wiped locked secret: {short_id(secret_id)}")
+        return True
+
     def increment_failed_attempts(self, secret):
         """Backend default: a read-modify-write through update_secret, so two
-        wrong passwords at the same moment can count once (S3, GCS). Backends
-        that can, count atomically instead (local, memory)."""
+        wrong passwords at the same moment can count once. The built-in
+        backends count atomically instead: local and memory under a lock, S3
+        and GCS with a compare-and-swap."""
         secret.failed_attempts += 1
         return self.update_secret(secret)
 

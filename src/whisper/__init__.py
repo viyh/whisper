@@ -154,9 +154,27 @@ def load_config(config_filenames=None, config_text=None):
     # check that loaded config is set correctly and return the config object
     config = check_config(config, default_config)
     check_secret_key(config.secret_key)
+    for name in POSITIVE_INT_SETTINGS:
+        check_positive_int(name, config[name])
     check_non_negative_int("create_rate_limit", config.create_rate_limit)
+    # Argon2's own minimum; the browser would fail on anything lower
+    if config.argon2_memory_cost < 8 * config.argon2_parallelism:
+        raise ConfigError(
+            "argon2_memory_cost", "Must be at least 8 x argon2_parallelism (in KB)"
+        )
     config.app_url_base = normalize_url_base(config.app_url_base)
     return config
+
+
+#: Settings that must be whole numbers of at least 1. A storage_clean_interval
+#: of 0 would run the cleaner nonstop, and a negative one would stop it.
+POSITIVE_INT_SETTINGS = (
+    "storage_clean_interval",
+    "max_data_size_kb",
+    "argon2_time_cost",
+    "argon2_memory_cost",
+    "argon2_parallelism",
+)
 
 
 #: Placeholder secret_key in config.default.yaml (refused, not used)
@@ -184,9 +202,19 @@ def normalize_url_base(value):
     return "/" + value.strip("/") + "/" if value.strip("/") else "/"
 
 
+def _is_int(value):
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
 def check_non_negative_int(name, value):
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+    if not _is_int(value) or value < 0:
         raise ConfigError(name, "Must be a non-negative integer")
+    return value
+
+
+def check_positive_int(name, value):
+    if not _is_int(value) or value < 1:
+        raise ConfigError(name, "Must be a positive integer")
     return value
 
 
@@ -313,6 +341,10 @@ class secret:
 
     def load_from_dict(self, secret_dict):
         """Load secret from a dict object"""
+        # a damaged file can hold valid JSON that isn't an object (null, [])
+        if not isinstance(secret_dict, dict):
+            logger.debug("Secret record is not a JSON object.")
+            return False
         # check if dict has all required attributes
         if not self.REQUIRED_ATTRS.issubset(set(secret_dict)):
             logger.debug("Secret dict is missing required attributes.")
@@ -352,16 +384,15 @@ class secret:
             self.expire_date = -1
 
     def is_expired(self):
-        """Check if secret is expired"""
+        """Check if secret is expired. A secret without valid dates counts as
+        expired, so a damaged record is never served and gets cleaned up."""
         now = int(time.time())
-        return (
-            self.expire_date
-            and now >= self.expire_date
-            and (
-                not self.is_one_time()
-                or (self.create_date and now - self.create_date >= 86400 * 30)
-            )
-        )
+        if not _is_int(self.expire_date):
+            return True
+        if self.is_one_time():
+            # unread one-time secrets are kept for 30 days
+            return not _is_int(self.create_date) or now - self.create_date >= 86400 * 30
+        return now >= self.expire_date
 
     def is_one_time(self):
         """Check if secret is one-time"""

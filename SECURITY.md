@@ -33,6 +33,28 @@ Please include:
 
 This project is maintained on a best-effort basis.
 
+## What Whisper Can't Protect Against
+
+Whisper encrypts and decrypts in the browser, so the server, its storage and
+its logs never see a secret, its password or its link token. That protection
+depends on the page itself, which the server sends on every visit. Someone who
+controls the running server, the container image, or a proxy in front of it
+can serve modified JavaScript that reads secrets and passwords as they are
+typed or opened. Keep the host and image up to date, deploy a pinned image
+version, and terminate TLS at a proxy you trust.
+
+Also outside what Whisper can protect:
+
+- **The sender's and recipient's devices**: malware, a browser extension with
+  access to the page, or a clipboard manager can read a secret there.
+- **Someone with both the link and the password**: that is everything needed
+  to open the secret.
+- **Rate limits across restarts and instances**: the per-IP limits are kept in
+  memory, so a restart (including a Cloud Run cold start) resets them, and
+  each instance counts separately. The per-secret lock after
+  `max_failed_attempts` wrong passwords is stored with the secret and isn't
+  affected.
+
 ## Scope
 
 In scope:

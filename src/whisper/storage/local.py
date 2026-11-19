@@ -14,6 +14,9 @@ logger = logging.getLogger(__name__)
 #: halfway through writing it, so the cleaner leaves it alone until then.
 UNREADABLE_GRACE_SECONDS = 60
 
+#: Suffix of the temp file a rewrite writes before replacing the secret file
+TMP_SUFFIX = ".tmp"
+
 
 class local(store):
     """Each secret is a ``<path>/<id>.json`` file, readable by its owner only.
@@ -72,12 +75,25 @@ class local(store):
             return self._rewrite(s)
 
     def _rewrite(self, s):
-        try:
-            fd = os.open(self._filename(s.id), os.O_WRONLY | os.O_TRUNC)
-        except FileNotFoundError:
+        """Replace an existing secret file with a complete new one, so a
+        crash or full disk mid-write leaves the old file intact. Callers hold
+        the lock, which claims and deletes also take, so a secret that is gone
+        stays gone."""
+        filename = self._filename(s.id)
+        if not os.path.exists(filename):
             return False
-        with os.fdopen(fd, "w") as secret_file:
-            json.dump(s.__dict__, secret_file)
+        tmp_filename = filename + TMP_SUFFIX
+        fd = os.open(tmp_filename, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            with os.fdopen(fd, "w") as tmp_file:
+                json.dump(s.__dict__, tmp_file)
+            os.replace(tmp_filename, filename)
+        except BaseException:
+            try:
+                os.remove(tmp_filename)
+            except FileNotFoundError:
+                pass
+            raise
         logger.debug(f"Updating secret: {short_id(s.id)}")
         return True
 
@@ -110,16 +126,14 @@ class local(store):
         return True
 
     def claim_secret(self, secret_id):
-        """Atomically claim a one-time secret using atomic rename."""
+        """Atomically claim a one-time secret: of several callers removing the
+        same file, exactly one succeeds."""
         s = secret(secret_id)
         if not s.check_id():
             return False
-        secret_filename = self._filename(s.id)
-        claimed_filename = secret_filename + ".claimed"
         with self._lock:
             try:
-                os.rename(secret_filename, claimed_filename)
-                os.remove(claimed_filename)
+                os.remove(self._filename(s.id))
                 return True
             except FileNotFoundError:
                 return False
@@ -149,6 +163,26 @@ class local(store):
                     continue
             if not s or s.is_expired():
                 self.delete_secret(secret_id)
+        self._delete_leftovers()
+
+    def _delete_leftovers(self):
+        """Remove files a crash left behind: a temp file from an interrupted
+        rewrite, or a claimed secret from before 0.5.1 (claims used to rename
+        the file before removing it)."""
+        for suffix in (TMP_SUFFIX, ".claimed"):
+            for filename in glob.glob(os.path.join(self.config.path, f"*.json{suffix}")):
+                secret_id = os.path.basename(filename)[: -len(f".json{suffix}")]
+                # only files named after a secret ID, like the rest of the cleaner
+                if not secret(secret_id).check_id():
+                    continue
+                with self._lock:
+                    if self._recently_modified(filename):
+                        continue
+                    try:
+                        os.remove(filename)
+                    except FileNotFoundError:
+                        continue
+                logger.info(f"Deleted leftover file: {short_id(secret_id)}")
 
     @staticmethod
     def _recently_modified(filename):
