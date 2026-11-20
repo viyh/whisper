@@ -324,6 +324,10 @@ def auth_digest(auth, key):
     return hmac.new(key.encode("utf-8"), auth.encode("ascii"), hashlib.sha256).hexdigest()
 
 
+#: How long an unread one-time secret is kept, in seconds
+ONE_TIME_RETENTION = 86400 * 30
+
+
 class secret:
     """Secret Class"""
 
@@ -383,16 +387,24 @@ class secret:
         else:
             self.expire_date = -1
 
+    def expires_at(self):
+        """When the secret expires, in UNIX time: its expire_date, or 30 days
+        after it was made for a one-time secret. None if its dates are
+        invalid."""
+        if not _is_int(self.expire_date):
+            return None
+        if self.is_one_time():
+            # unread one-time secrets are kept for 30 days
+            if not _is_int(self.create_date):
+                return None
+            return self.create_date + ONE_TIME_RETENTION
+        return self.expire_date
+
     def is_expired(self):
         """Check if secret is expired. A secret without valid dates counts as
         expired, so a damaged record is never served and gets cleaned up."""
-        now = int(time.time())
-        if not _is_int(self.expire_date):
-            return True
-        if self.is_one_time():
-            # unread one-time secrets are kept for 30 days
-            return not _is_int(self.create_date) or now - self.create_date >= 86400 * 30
-        return now >= self.expire_date
+        expires_at = self.expires_at()
+        return expires_at is None or int(time.time()) >= expires_at
 
     def is_one_time(self):
         """Check if secret is one-time"""

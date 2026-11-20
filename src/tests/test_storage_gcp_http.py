@@ -40,6 +40,7 @@ class FakeBucket(requests.adapters.HTTPAdapter):
         self.content = content
         self.race = lambda method, query: None
         self.log = []
+        self.uploaded = None  # the object resource sent with the last upload
 
     def overwrite(self, content):
         self.generation += 1
@@ -68,8 +69,9 @@ class FakeBucket(requests.adapters.HTTPAdapter):
             if isinstance(content_type, str):
                 content_type = content_type.encode()
             boundary = content_type.split(b"boundary=")[1].strip(b'"')
-            media_part = request.body.split(b"--" + boundary)[2]
-            self.overwrite(media_part.split(b"\r\n\r\n", 1)[1].rstrip(b"\r\n"))
+            parts = request.body.split(b"--" + boundary)
+            self.uploaded = json.loads(parts[1].split(b"\r\n\r\n", 1)[1])
+            self.overwrite(parts[2].split(b"\r\n\r\n", 1)[1].rstrip(b"\r\n"))
             return 200, json.dumps(self._resource()).encode()
         # asking for a generation by number: gone once it's overwritten
         if not live or query.get("generation") not in (None, current):
@@ -175,3 +177,17 @@ def test_wrong_password_count_for_a_deleted_secret(gcs_backend):
     assert backend.delete_secret(s.id) is True
     assert _store(backend).record_failed_attempt(s) is False
     assert fake.content is None  # not recreated
+
+
+def test_uploads_send_the_expiry_as_custom_time(gcs_backend):
+    """For the bucket's daysSinceCustomTime lifecycle rule, which deletes
+    expired secrets even while the cleaner isn't running."""
+    import datetime
+
+    backend, fake, s = gcs_backend
+    assert _store(backend).record_failed_attempt(s) is True
+    sent = datetime.datetime.fromisoformat(fake.uploaded["customTime"])
+    assert sent.timestamp() == s.create_date + 86400 * 30  # one-time: kept 30 days
+    assert fake.uploaded["metadata"] == {
+        "create_date": str(s.create_date), "expire_date": str(s.expire_date),
+    }

@@ -55,6 +55,8 @@ def test_set_secret_sends_metadata_with_upload(backend):
     blob = backend.bucket.blob.return_value
     assert backend.set_secret(s) is True
     assert blob.metadata == {"create_date": str(s.create_date), "expire_date": str(s.expire_date)}
+    # for the bucket's daysSinceCustomTime lifecycle rule
+    assert blob.custom_time.timestamp() == s.expire_date
     blob.upload_from_string.assert_called_once()
     assert blob.upload_from_string.call_args.kwargs["if_generation_match"] == 0
     blob.patch.assert_not_called()
