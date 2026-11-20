@@ -131,6 +131,19 @@ def test_one_time_secret_can_only_be_claimed_once(client):
     assert "already viewed" in second["result"]
 
 
+def test_a_read_one_time_secret_cannot_be_stored_again(client, app_module):
+    """Anyone with the link and password could read the secret, then store
+    it (or something else) under the same ID, and the recipient would never
+    see "already viewed"."""
+    _, sid = _create(client, expiration="One time use")
+    assert _retrieve(client, sid).get_json()["encrypted_data"] == "opaque-ciphertext"
+    again, _ = _create(client, id=sid, expiration="One time use", encrypted_data="replaced")
+    assert again.status_code == 409
+    assert "already viewed" in _retrieve(client, sid).get_json()["result"]
+    stored = app_module.store.get_secret(sid)
+    assert (stored.data, stored.hash) == ("", "")  # only the record is kept
+
+
 def test_non_one_time_secret_is_reusable(client):
     _, sid = _create(client, expiration="1 hour")
     assert _retrieve(client, sid).get_json()["encrypted_data"] == "opaque-ciphertext"
@@ -173,7 +186,9 @@ def test_raising_the_limit_does_not_reopen_a_wiped_secret(client, app_module, mo
     for _ in range(10):
         _retrieve(client, sid, BAD_AUTH)
     monkeypatch.setitem(app_module.config, "max_failed_attempts", 20)
-    assert _retrieve(client, sid).get_json() == {"result": "Invalid password."}
+    answer = _retrieve(client, sid).get_json()
+    assert "encrypted_data" not in answer and "doesn't exist" in answer["result"]
+    assert app_module.store.get_secret(sid).failed_attempts == 10  # not counted
 
 
 def test_secret_locked_by_an_older_version_is_wiped(client, app_module):
@@ -213,15 +228,68 @@ def test_expired_secret_cannot_be_retrieved_before_cleanup(client, app_module):
     assert "encrypted_data" not in _retrieve(client, sid).get_json()
 
 
-def test_failed_attempt_does_not_resurrect_claimed_secret(client, app_module):
+def test_failed_attempt_does_not_bring_back_a_claimed_secret(client, app_module):
     """A wrong-password request that loaded the secret before a concurrent
-    successful claim must not write it back into storage."""
+    successful claim counts on the claimed record, without the ciphertext."""
     _, sid = _create(client)
     loaded = app_module.store.get_secret(sid)  # wrong-password request reads...
-    assert app_module.store.claim_secret(sid) is True  # ...recipient claims...
-    loaded.failed_attempts += 1
-    assert app_module.store.update_secret(loaded) is False  # ...write-back is a no-op
-    assert app_module.store.get_secret(sid) is False
+    assert _retrieve(client, sid).get_json()["encrypted_data"]  # ...recipient claims...
+    assert app_module.store.record_failed_attempt(loaded) is True  # ...then it counts
+    stored = app_module.store.get_secret(sid)
+    assert (stored.data, stored.hash, stored.failed_attempts) == ("", "", 1)
+
+
+def _first_read_from_before(app_module, monkeypatch, stale):
+    """The next request's first read returns ``stale``, as if it read the
+    secret before the other requests in the test; later reads are live."""
+    real = app_module.store.get_secret
+    reads = iter([stale])
+    monkeypatch.setattr(app_module.store, "get_secret", lambda sid: next(reads, None) or real(sid))
+
+
+@pytest.mark.parametrize("expiration", ["One time use", "1 hour"])
+def test_a_right_password_after_the_lock_answers_locked(client, app_module, monkeypatch, expiration):
+    """It was read before the lock, then wrong passwords sent at the same
+    moment locked it: it doesn't open, so concurrent guesses can't get past
+    max_failed_attempts."""
+    _, sid = _create(client, expiration=expiration)
+    stale = app_module.store.get_secret(sid)
+    for _ in range(10):
+        _retrieve(client, sid, BAD_AUTH)
+    _first_read_from_before(app_module, monkeypatch, stale)
+    answer = _retrieve(client, sid).get_json()
+    assert "encrypted_data" not in answer and "locked" in answer["result"]
+
+
+def test_a_wrong_password_after_the_lock_answers_locked(client, app_module, monkeypatch):
+    """The same answer as the right password then gets, so a guess past the
+    limit can't tell whether it was right."""
+    _, sid = _create(client, expiration="1 hour")
+    stale = app_module.store.get_secret(sid)
+    for _ in range(10):
+        _retrieve(client, sid, BAD_AUTH)
+    _first_read_from_before(app_module, monkeypatch, stale)
+    assert "locked" in _retrieve(client, sid, BAD_AUTH).get_json()["result"]
+    assert app_module.store.get_secret(sid).failed_attempts == 11
+
+
+@pytest.mark.parametrize("auth", [GOOD_AUTH, BAD_AUTH])
+def test_a_busy_secret_answers_try_again(client, app_module, monkeypatch, auth):
+    """Other requests kept writing to it first: nothing was counted or
+    opened, so the answer says nothing about the password."""
+    from whisper.storage import StorageBusy
+
+    _, sid = _create(client, expiration="One time use")
+
+    def busy(secret_id, change):
+        raise StorageBusy()
+
+    monkeypatch.setattr(app_module.store.backend, "modify_secret", busy)
+    r = _retrieve(client, sid, auth)
+    assert r.status_code == 429
+    assert r.get_json() == {"result": "Too many attempts. Please try again later."}
+    monkeypatch.undo()
+    assert _retrieve(client, sid).get_json()["encrypted_data"] == "opaque-ciphertext"
 
 
 def test_old_links_explain_instead_of_failing_silently(client):

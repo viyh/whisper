@@ -1,3 +1,4 @@
+import copy
 import logging
 import threading
 import time
@@ -6,9 +7,24 @@ from whisper import check_config, class_loader, secret, short_id
 
 logger = logging.getLogger(__name__)
 
-#: How often S3 and GCS retry a conditional write or delete that another
-#: write got to first (a compare-and-swap), before giving up
+#: How often S3 and GCS retry a conditional write that another write got to
+#: first (a compare-and-swap), before giving up with StorageBusy
 CAS_ATTEMPTS = 5
+
+
+class StorageBusy(Exception):
+    """A change to a secret lost to other writes CAS_ATTEMPTS times in a row.
+    Nothing was written, so the request can be tried again."""
+
+
+def _wipe(stored):
+    """modify_secret change: drop the ciphertext and auth hash, and keep the
+    rest of the record (ID, dates, failed_attempts). None if they're gone."""
+    if not stored.data and not stored.hash:
+        return None
+    stored.data = ""
+    stored.hash = ""
+    return stored
 
 
 class store_cleaner:
@@ -80,51 +96,97 @@ class store:
 
     def update_secret(self, secret):
         """Save changes to a secret that already exists in the backend.
-        Never recreates a secret that was deleted or claimed in the meantime.
+        Never recreates a secret that was deleted in the meantime.
         Returns True if the update was written, False otherwise."""
         return self.backend.update_secret(secret)
 
-    def record_failed_attempt(self, secret):
-        """Add a wrong password to the secret's failed_attempts count. Never
-        recreates a secret that was claimed in the meantime. Returns True if
-        the count was written."""
-        return self.backend.increment_failed_attempts(secret)
+    def record_failed_attempt(self, s):
+        """Add a wrong password to the stored failed_attempts count,
+        atomically, so simultaneous wrong passwords each count. Sets
+        s.failed_attempts to the new count. Returns False if the secret is
+        gone. Raises StorageBusy if the count couldn't be written."""
+
+        def add_one(stored):
+            stored.failed_attempts += 1
+            return stored
+
+        _, written = self.backend.modify_secret(s.id, add_one)
+        if not written:
+            return False
+        s.failed_attempts = written.failed_attempts
+        return True
 
     def wipe_secret(self, secret_id):
         """Blank a locked secret's ciphertext and auth hash. It can never be
         opened again, so only what the "locked" answer needs is kept: the
         record, which also keeps the ID taken, its dates and its
-        failed_attempts. Never recreates a secret claimed in the meantime.
-        Returns True if the secret is wiped."""
-        s = self.backend.get_secret(secret_id)
-        if not isinstance(s, secret) or not s.check_id():
-            return False
-        if not s.data and not s.hash:
-            return True
-        s.data = ""
-        s.hash = ""
-        if not self.backend.update_secret(s):
-            return False
-        logger.info(f"Wiped locked secret: {short_id(secret_id)}")
-        return True
+        failed_attempts. Returns True if the secret is wiped (now or before)."""
+        try:
+            stored, written = self.backend.modify_secret(secret_id, _wipe)
+        except StorageBusy:
+            return False  # the next attempt on the secret wipes it
+        if written:
+            logger.info(f"Wiped locked secret: {short_id(secret_id)}")
+        return stored is not None
 
-    def increment_failed_attempts(self, secret):
-        """Backend default: a read-modify-write through update_secret, so two
-        wrong passwords at the same moment can count once. The built-in
-        backends count atomically instead: local and memory under a lock, S3
-        and GCS with a compare-and-swap."""
-        secret.failed_attempts += 1
-        return self.update_secret(secret)
+    def open_secret(self, s, max_failed_attempts=0):
+        """The stored secret, ciphertext included, for a request whose
+        password checked out against ``s`` (an earlier read), or False if it
+        can't be opened any more: read, locked or deleted since that read.
+
+        It goes by what is stored now, not by ``s``, so wrong passwords
+        counted since the read still lock it: simultaneous guesses can't get
+        past max_failed_attempts.
+
+        A one-time secret is claimed: atomically replaced with its wiped
+        record, so exactly one request gets the ciphertext. The record keeps
+        the ID taken until it expires. Otherwise anyone with the link and the
+        password could store the secret (or something else) under it again
+        after reading it, and the recipient would never see "already viewed".
+
+        Raises StorageBusy if a claim kept losing to other writes."""
+
+        def openable(stored):
+            return bool(
+                stored
+                and not stored.is_wiped()
+                and stored.hash == s.hash  # the record the password was checked against
+                and not stored.is_locked(max_failed_attempts)
+                and not stored.is_expired()
+            )
+
+        if s.is_one_time():
+            stored, written = self.backend.modify_secret(
+                s.id, lambda stored: _wipe(stored) if openable(stored) else None
+            )
+            return stored if written else False
+        stored = self.get_secret(s.id)
+        return stored if openable(stored) else False
+
+    def modify_secret(self, secret_id, change):
+        """Change a stored secret. ``change`` gets a copy of it and returns
+        the secret to write in its place, or None to leave it as it is.
+        Returns (stored, written): the secret as read and as written (None if
+        change left it), or (None, None) if there's no such secret.
+
+        Backend default: a read and update_secret, so two changes at the same
+        moment can undo one another. The built-in backends make it atomic:
+        local and memory under a lock, S3 and GCS with a compare-and-swap,
+        which raises StorageBusy after CAS_ATTEMPTS lost races."""
+        stored = self.get_secret(secret_id)
+        if not stored:
+            return None, None
+        changed = change(copy.copy(stored))
+        if changed is None:
+            return stored, None
+        if not self.update_secret(changed):
+            return None, None
+        return stored, changed
 
     def delete_secret(self, secret_id):
         """Delete a secret from the storage backend"""
         logger.info(f"Delete secret: {short_id(secret_id)}")
         return self.backend.delete_secret(secret_id)
-
-    def claim_secret(self, secret_id):
-        """Atomically claim a one-time secret (delete and return True if it existed).
-        Returns True if this caller won the race, False otherwise."""
-        return self.backend.claim_secret(secret_id)
 
     def delete_expired(self):
         """Delete expired secrets from the storage backend"""

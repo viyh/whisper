@@ -75,10 +75,10 @@ def test_flask_exception_log_is_redacted(client, app_module, captured, monkeypat
               "encrypted_data": "x", "version": 3},
     )
 
-    def boom(secret_id):
-        raise RuntimeError(f"backend failed on secrets/{secret_id}.json")
+    def boom(s, max_failed_attempts=0):
+        raise RuntimeError(f"backend failed on secrets/{s.id}.json")
 
-    monkeypatch.setattr(app_module.store, "claim_secret", boom)
+    monkeypatch.setattr(app_module.store, "open_secret", boom)
     monkeypatch.setitem(app_module.app.config, "PROPAGATE_EXCEPTIONS", False)
     r = client.post("/retrieve", json={"id": sid, "auth": auth})
     assert r.status_code == 500

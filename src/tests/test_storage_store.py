@@ -4,6 +4,8 @@ import secrets
 import threading
 import time
 
+import pytest
+
 from whisper import secret
 from whisper.storage import store, store_cleaner
 from whisper.storage.memory import memory
@@ -82,13 +84,126 @@ def test_wipe_secret_keeps_only_the_locked_record(tmp_path):
         assert st.wipe_secret(s.id) is True  # already wiped: nothing to write
 
 
-def test_wipe_secret_does_not_recreate_a_secret_claimed_meanwhile(tmp_path, monkeypatch):
+def test_wipe_secret_does_not_recreate_a_deleted_secret(tmp_path):
     for st in (_store_with_memory_backend(), _store_with_local_backend(tmp_path / "store")):
-        s = _make_secret("One time use")
+        s = _make_secret()
         st.set_secret(s)
-        loaded = st.backend.get_secret(s.id)  # the wipe reads it...
-        assert st.claim_secret(s.id) is True  # ...the recipient claims it...
-        monkeypatch.setattr(st.backend, "get_secret", lambda _id, loaded=loaded: loaded)
-        assert st.wipe_secret(s.id) is False  # ...and the wipe writes nothing
-        monkeypatch.undo()
-        assert st.get_secret(s.id) is False
+        st.delete_secret(s.id)
+        assert st.wipe_secret(s.id) is False
+        assert st.backend.get_secret(s.id) is False
+
+
+def test_wipe_secret_gives_up_quietly_when_busy(monkeypatch):
+    from whisper.storage import StorageBusy
+
+    st = _store_with_memory_backend()
+
+    def busy(secret_id, change):
+        raise StorageBusy()
+
+    monkeypatch.setattr(st.backend, "modify_secret", busy)
+    assert st.wipe_secret(_make_secret().id) is False
+
+
+@pytest.fixture(params=["memory", "local"])
+def st(request, tmp_path):
+    if request.param == "memory":
+        return _store_with_memory_backend()
+    return _store_with_local_backend(tmp_path / "store")
+
+
+def test_opening_a_one_time_secret_keeps_its_id_taken(st):
+    """Its record stays, without the ciphertext, until it expires. Before,
+    anyone with the link and password could store it again after reading
+    it, and the recipient would never see "already viewed"."""
+    s = _make_secret("One time use")
+    st.set_secret(s)
+    opened = st.open_secret(st.get_secret(s.id))
+    assert opened.data == "ciphertext"
+    stored = st.get_secret(s.id)
+    assert (stored.data, stored.hash) == ("", "")
+    assert (stored.create_date, stored.expire_date) == (s.create_date, s.expire_date)
+    assert st.open_secret(s) is False
+    assert st.set_secret(s) is False
+
+
+def test_only_one_simultaneous_open_gets_a_one_time_secret(st):
+    s = _make_secret("One time use")
+    st.set_secret(s)
+    start = threading.Barrier(20)
+    results = []
+
+    def open_it():
+        loaded = st.get_secret(s.id)
+        start.wait()
+        results.append(st.open_secret(loaded))
+
+    threads = [threading.Thread(target=open_it) for _ in range(20)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert [r.data for r in results if r] == ["ciphertext"]
+
+
+@pytest.mark.parametrize("expiration", ["One time use", "1 hour"])
+def test_a_secret_locked_since_it_was_read_does_not_open(st, expiration):
+    """Wrong passwords sent at the same moment as the right one count."""
+    s = _make_secret(expiration)
+    st.set_secret(s)
+    loaded = st.get_secret(s.id)  # the right password's request reads it...
+    for _ in range(3):  # ...and wrong passwords lock it meanwhile
+        assert st.record_failed_attempt(st.get_secret(s.id)) is True
+    assert st.open_secret(loaded, max_failed_attempts=3) is False
+    assert st.get_secret(s.id).data == "ciphertext"  # not claimed
+    assert st.open_secret(loaded, max_failed_attempts=4).data == "ciphertext"
+
+
+@pytest.mark.parametrize("expiration", ["One time use", "1 hour"])
+def test_a_secret_wiped_since_it_was_read_does_not_open(st, expiration):
+    s = _make_secret(expiration)
+    st.set_secret(s)
+    loaded = st.get_secret(s.id)
+    assert st.wipe_secret(s.id) is True
+    assert st.open_secret(loaded) is False
+
+
+def test_a_time_limited_secret_opens_from_the_stored_copy(st):
+    s = _make_secret()
+    st.set_secret(s)
+    loaded = st.get_secret(s.id)
+    loaded.data = "stale"
+    assert st.open_secret(loaded).data == "ciphertext"
+    assert st.open_secret(loaded).data == "ciphertext"  # not claimed
+    loaded.hash = "another record"
+    assert st.open_secret(loaded) is False
+
+
+def test_record_failed_attempt_counts_on_the_stored_copy(st):
+    s = _make_secret()
+    st.set_secret(s)
+    stale = st.get_secret(s.id)
+    assert st.record_failed_attempt(st.get_secret(s.id)) is True
+    assert st.record_failed_attempt(stale) is True
+    assert stale.failed_attempts == 2
+    assert st.get_secret(s.id).failed_attempts == 2
+    assert st.record_failed_attempt(_make_secret()) is False  # not stored
+
+
+def test_default_modify_secret_for_other_backends():
+    """A backend without its own modify_secret gets one built on
+    get_secret and update_secret."""
+    from whisper.storage.memory import memory
+
+    class plain(memory):
+        modify_secret = store.modify_secret
+
+    st = store("x", {}, clean_interval=86400)
+    st.backend = plain()
+    st.backend.start()
+    s = _make_secret("One time use")
+    st.set_secret(s)
+    assert st.record_failed_attempt(st.get_secret(s.id)) is True
+    assert st.open_secret(st.get_secret(s.id)).failed_attempts == 1
+    assert st.get_secret(s.id).is_wiped()
+    assert st.backend.modify_secret("b" * 64, lambda stored: stored) == (None, None)
