@@ -47,7 +47,13 @@ class local(store):
             logger.info(f"Created directory {path}")
         except FileExistsError:
             pass
-        info = os.stat(path)
+        # lstat: the path itself, not where a link points. Whoever owns a
+        # link (e.g. one another user made at /tmp/whisper) can point it
+        # elsewhere at any time. Without trailing slashes, which would make
+        # lstat follow the link.
+        info = os.lstat(path.rstrip(os.sep) or os.sep)
+        if stat.S_ISLNK(info.st_mode):
+            raise ConfigError("path", "Storage path is a symbolic link; set it to the directory itself")
         if not stat.S_ISDIR(info.st_mode):
             raise ConfigError("path", "Storage path is not a directory")
         # e.g. /tmp/whisper created by another user first, or a mounted
