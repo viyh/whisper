@@ -1,3 +1,4 @@
+import copy
 import json
 import logging
 import posixpath
@@ -6,7 +7,7 @@ import boto3
 from botocore.exceptions import ClientError
 
 from whisper import secret, short_id
-from whisper.storage import CAS_ATTEMPTS, store
+from whisper.storage import CAS_ATTEMPTS, StorageBusy, store
 
 logger = logging.getLogger(__name__)
 
@@ -43,13 +44,12 @@ class s3(store):
     without downloading every object.
 
     Concurrency relies on S3 conditional requests: new secrets are written
-    with ``IfNoneMatch="*"`` so an existing secret is never replaced, a
-    one-time claim deletes with ``IfMatch`` on the ETag so exactly one caller
-    wins (plain S3 deletes are idempotent and would let every concurrent
-    caller "win"), and updates write with ``IfMatch`` so a claimed secret is
-    never recreated. Wrong passwords are counted with a compare-and-swap
-    against the ETag of the copy that was read, and a claim that loses to a
-    wrong-password write retries.
+    with ``IfNoneMatch="*"`` so an existing secret is never replaced, and
+    updates write with ``IfMatch`` so a deleted secret is never recreated.
+    Changes (wrong-password counts, one-time claims, wipes) are a
+    compare-and-swap against the ETag of the copy that was read, retried if
+    another write got in first. A claim replaces the secret with its wiped
+    record, so exactly one caller wins: the losers find the wiped record.
 
     botocore retries transient errors; other errors propagate. The cleaner
     thread logs and survives errors raised from ``delete_expired``.
@@ -135,7 +135,7 @@ class s3(store):
 
     def update_secret(self, s):
         """Overwrite only if the object still exists, pinned to its current
-        ETag so a concurrent claim/delete makes this a no-op."""
+        ETag so a concurrent delete makes this a no-op."""
         if not s.check_id():
             return False
         etag = self._etag(self._path(s.id))
@@ -158,55 +158,32 @@ class s3(store):
         )
         return True
 
-    def increment_failed_attempts(self, s):
-        """Count a wrong password with a compare-and-swap: write the stored
-        copy plus one, pinned to the ETag it was read with. If another write
-        got in first, read again and retry, so simultaneous wrong passwords
-        each count and nothing written in between (e.g. a wipe) is undone."""
-        if not s.check_id():
-            return False
+    def modify_secret(self, secret_id, change):
+        """Change a stored secret with a compare-and-swap: write change()'s
+        result pinned to the ETag the secret was read with. If another write
+        got in first, read again and retry, so simultaneous changes (wrong
+        passwords counted at the same moment, a claim, a wipe) never undo one
+        another. Raises StorageBusy after CAS_ATTEMPTS lost races."""
+        if not secret(secret_id).check_id():
+            return None, None
         for _ in range(CAS_ATTEMPTS):
-            stored, etag = self._read(s.id)
+            stored, etag = self._read(secret_id)
             if not stored or etag is None:
-                return False
-            stored.failed_attempts += 1
+                return None, None
+            changed = change(copy.copy(stored))
+            if changed is None:
+                return stored, None
             try:
-                self._upload(stored, IfMatch=etag)
+                self._upload(changed, IfMatch=etag)
             except ClientError as e:
                 if _error_code(e) in _WRITE_REFUSED:
                     continue  # changed since the read
                 if _gone_or_changed(e):
-                    return False  # claimed or deleted since the read
+                    return None, None  # deleted since the read
                 raise
-            s.failed_attempts = stored.failed_attempts
-            return True
-        logger.warning(f"Too many concurrent writes, wrong password not counted: {short_id(s.id)}")
-        return False
-
-    def claim_secret(self, secret_id):
-        """Atomically claim a one-time secret by deleting it pinned to its
-        ETag, so exactly one caller wins. If a wrong-password write changed
-        the object in between, it is still there to claim: look again."""
-        if not secret(secret_id).check_id():
-            return False
-        path = self._path(secret_id)
-        for _ in range(CAS_ATTEMPTS):
-            etag = self._etag(path)
-            if etag is None:
-                return False
-            try:
-                self.client.delete_object(
-                    Bucket=self.config.bucket_name, Key=path, IfMatch=etag
-                )
-            except ClientError as e:
-                if _error_code(e) in _WRITE_REFUSED:
-                    continue  # changed since the lookup
-                if _gone_or_changed(e):
-                    return False
-                raise
-            return True
-        logger.warning(f"Too many concurrent writes, claim given up: {short_id(secret_id)}")
-        return False
+            return stored, changed
+        logger.warning(f"Too many concurrent writes, change not made: {short_id(secret_id)}")
+        raise StorageBusy()
 
     def delete_expired(self):
         pages = self.client.get_paginator("list_objects_v2").paginate(
@@ -224,7 +201,7 @@ class s3(store):
                     continue
                 dates = self._dates_from_tags(key)
                 if dates is _GONE:
-                    # claimed or deleted since the listing: nothing to do
+                    # deleted since the listing: nothing to do
                     continue
                 if dates is None:
                     # no usable tags: fall back to reading the dates from the

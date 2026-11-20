@@ -398,6 +398,17 @@ class secret:
         """Check if secret is one-time"""
         return self.expire_date == -1
 
+    def is_locked(self, max_failed_attempts):
+        """True once max_failed_attempts wrong passwords were counted (0 = the
+        lock is off)."""
+        return bool(max_failed_attempts) and self.failed_attempts >= max_failed_attempts
+
+    def is_wiped(self):
+        """True if the ciphertext and auth hash are gone: a one-time secret
+        that was read, or a locked one. The rest of the record is kept until
+        it expires, so its ID can't be used for a new secret."""
+        return not self.data or not self.hash
+
     def check_auth(self, auth, key):
         """Check the browser's auth token against the stored HMAC, in
         constant time."""

@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+* A one-time secret that was read keeps its record, without the ciphertext, until 30 days after it was made. Before, its ID was free again, so anyone with the link and the password could read the secret, then store it (or something else) under the same link, and the recipient would see no sign it had been opened.
+* Wrong passwords sent at the same moment as the right one count: the stored secret is checked again just before its ciphertext is returned, and a guess counted after the lock is answered "locked", as the right password is then. Before, simultaneous guesses could get past `max_failed_attempts`, one for each request in flight at the time.
+* S3 and GCS: a request whose write keeps losing to other writes to the same secret (5 times in a row) is answered "try again later" (429) instead of "Invalid password." or "already viewed", so a guess that wasn't counted reveals nothing.
+* S3 and GCS: a one-time claim overwrites the secret with its record instead of deleting it, so it no longer relies on how a conditional delete of an already deleted object is answered.
+
+### Changed
+* Storage backends implement `modify_secret()` instead of `claim_secret()` and `increment_failed_attempts()` (see Writing Storage Backends in the README).
+
+### Fixed
+* Wiping a locked secret is a compare-and-swap too, so it can't undo a wrong-password count written at the same moment.
+
 ## [0.5.1] - 2026-11-19
 
 ### Security

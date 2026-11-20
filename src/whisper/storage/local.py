@@ -1,3 +1,4 @@
+import copy
 import glob
 import json
 import logging
@@ -67,8 +68,8 @@ class local(store):
         return True
 
     def update_secret(self, s):
-        """Rewrite an existing secret file. Opening without O_CREAT fails if the
-        file was claimed/deleted, so a claimed secret is never recreated."""
+        """Rewrite an existing secret file. A deleted secret is never
+        recreated."""
         if not s.check_id():
             return False
         with self._lock:
@@ -77,8 +78,8 @@ class local(store):
     def _rewrite(self, s):
         """Replace an existing secret file with a complete new one, so a
         crash or full disk mid-write leaves the old file intact. Callers hold
-        the lock, which claims and deletes also take, so a secret that is gone
-        stays gone."""
+        the lock, which deletes also take, so a secret that is gone stays
+        gone."""
         filename = self._filename(s.id)
         if not os.path.exists(filename):
             return False
@@ -97,20 +98,23 @@ class local(store):
         logger.debug(f"Updating secret: {short_id(s.id)}")
         return True
 
-    def increment_failed_attempts(self, s):
-        """Count a wrong password atomically: re-read the stored count under
-        the lock, so concurrent wrong passwords each count."""
+    def modify_secret(self, secret_id, change):
+        """Change a stored secret atomically: read, change and rewrite it under
+        the lock, so simultaneous changes (wrong passwords counted at the same
+        moment, a claim) never undo one another."""
+        s = secret(secret_id)
         if not s.check_id():
-            return False
+            return None, None
         with self._lock:
             stored = self.secret_from_file(self._filename(s.id))
             if not stored:
-                return False
-            stored.failed_attempts += 1
-            if not self._rewrite(stored):
-                return False
-        s.failed_attempts = stored.failed_attempts
-        return True
+                return None, None
+            changed = change(copy.copy(stored))
+            if changed is None:
+                return stored, None
+            if not self._rewrite(changed):
+                return None, None
+        return stored, changed
 
     def delete_secret(self, secret_id):
         s = secret(secret_id)
@@ -120,23 +124,10 @@ class local(store):
             with self._lock:
                 os.remove(self._filename(s.id))
         except FileNotFoundError:
-            # already gone (claimed, or deleted by a concurrent cleanup)
+            # already gone (deleted by a concurrent cleanup)
             return True
         logger.info(f"Deleting secret: {short_id(secret_id)}")
         return True
-
-    def claim_secret(self, secret_id):
-        """Atomically claim a one-time secret: of several callers removing the
-        same file, exactly one succeeds."""
-        s = secret(secret_id)
-        if not s.check_id():
-            return False
-        with self._lock:
-            try:
-                os.remove(self._filename(s.id))
-                return True
-            except FileNotFoundError:
-                return False
 
     def secret_from_file(self, secret_filename):
         if not os.path.exists(secret_filename):

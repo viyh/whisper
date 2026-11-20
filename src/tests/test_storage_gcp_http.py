@@ -96,8 +96,8 @@ class FakeBucket(requests.adapters.HTTPAdapter):
 @pytest.fixture
 def gcs_backend():
     s = secret()
-    s.create(secret_id=secrets.token_hex(32), expiration="1 hour", auth="a" * 64, key="k",
-             data="ciphertext")
+    s.create(secret_id=secrets.token_hex(32), expiration="One time use", auth="a" * 64,
+             key="k", data="ciphertext")
     fake = FakeBucket(f"secrets/{s.id}.json", json.dumps(s.__dict__).encode())
     # the session type the library uses itself, with the fake bucket as its transport
     session = AuthorizedSession(AnonymousCredentials())
@@ -126,25 +126,36 @@ def _overwrite_once(fake, method, alt=None, **changes):
     fake.race = race
 
 
-def test_claim_works_once(gcs_backend):
+def _store(backend):
+    from whisper.storage import store
+
+    st = store("whisper.storage.gcp.gcs")
+    st.backend = backend
+    return st
+
+
+def test_a_one_time_secret_opens_once_and_keeps_its_id(gcs_backend):
     backend, fake, s = gcs_backend
-    assert backend.claim_secret(s.id) is True
-    assert fake.content is None
-    assert backend.claim_secret(s.id) is False
+    st = _store(backend)
+    assert st.open_secret(s).data == "ciphertext"
+    stored = _stored(fake)
+    assert (stored["data"], stored["hash"]) == ("", "")
+    assert st.open_secret(s) is False
+    assert backend.set_secret(s) is False  # the ID stays taken
 
 
 def test_claim_after_an_overwrite_retries_instead_of_reporting_gone(gcs_backend):
     backend, fake, s = gcs_backend
-    _overwrite_once(fake, "DELETE", failed_attempts=1)
-    assert backend.claim_secret(s.id) is True
-    assert fake.content is None
+    _overwrite_once(fake, "POST", failed_attempts=1)
+    assert _store(backend).open_secret(s).data == "ciphertext"
+    assert _stored(fake)["data"] == ""
     assert not any("generation" in query for _, query in fake.log)
 
 
 def test_wrong_password_count_after_an_overwrite_mid_read(gcs_backend):
     backend, fake, s = gcs_backend
     _overwrite_once(fake, "GET", alt="media", failed_attempts=5)
-    assert backend.increment_failed_attempts(s) is True
+    assert _store(backend).record_failed_attempt(s) is True
     assert s.failed_attempts == 6
     assert _stored(fake)["failed_attempts"] == 6
 
@@ -153,14 +164,14 @@ def test_wrong_password_count_after_an_overwrite_before_the_write(gcs_backend):
     """Also a wipe: the count goes on top of it, the ciphertext stays gone."""
     backend, fake, s = gcs_backend
     _overwrite_once(fake, "POST", failed_attempts=10, data="", hash="")
-    assert backend.increment_failed_attempts(s) is True
+    assert _store(backend).record_failed_attempt(s) is True
     stored = _stored(fake)
     assert (stored["failed_attempts"], stored["data"], stored["hash"]) == (11, "", "")
     assert not any("generation" in query for _, query in fake.log)
 
 
-def test_wrong_password_count_for_a_claimed_secret(gcs_backend):
+def test_wrong_password_count_for_a_deleted_secret(gcs_backend):
     backend, fake, s = gcs_backend
-    assert backend.claim_secret(s.id) is True
-    assert backend.increment_failed_attempts(s) is False
+    assert backend.delete_secret(s.id) is True
+    assert _store(backend).record_failed_attempt(s) is False
     assert fake.content is None  # not recreated
