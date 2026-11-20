@@ -131,7 +131,7 @@ Use the GCS or S3 backend on Cloud Run or ECS; local and in-memory storage lose 
 
 ### Local Disk (default)
 
-Stores secrets as JSON files. Mount a volume for persistence. The directory should be owned by the user Whisper runs as, with mode 700. Whisper warns at startup if others can use it, and refuses a path that is a symbolic link.
+Stores secrets as JSON files. Mount a volume for persistence. The directory should be owned by the user Whisper runs as (uid 65534 in the image), with mode 700. Whisper warns at startup if others can use it, and refuses a path that is a symbolic link. A new Docker volume, as below, starts out that way. For a host directory (a bind mount), create it first: `sudo install -d -o 65534 -g 65534 -m 700 /path/to/data`.
 
 ```yaml
 storage_class: whisper.storage.local.local
