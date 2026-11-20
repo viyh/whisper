@@ -27,7 +27,7 @@ from whisper import (
 from whisper.log_redaction import install_redaction
 from whisper.storage import StorageBusy, store
 
-__version__ = "0.5.1"
+__version__ = "0.5.2"
 
 app = Flask("whisper")
 
