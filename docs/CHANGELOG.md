@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 * Wiping a locked secret is a compare-and-swap too, so it can't undo a wrong-password count written at the same moment.
+* The local backend couldn't store secrets in a Docker volume as shown in the README: Docker created the volume owned by root, and Whisper runs as uid 65534. The image now has `/tmp/whisper` owned by uid 65534 with mode 700, which a new volume mounted there takes on. A volume created before this is still owned by root: recreate it. For a host directory (bind mount, as in the Compose example), the README shows how to create it.
 
 ## [0.5.1] - 2026-11-19
 

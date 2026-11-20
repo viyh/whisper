@@ -9,6 +9,8 @@ services:
       LOG_LEVEL: INFO
     volumes:
       - /home/whisper/conf/config.yaml:/usr/src/app/config.yaml:ro
+      # owned by whisper's user (uid 65534), mode 700:
+      #   sudo install -d -o 65534 -g 65534 -m 700 /home/whisper/data
       - /home/whisper/data:/tmp/whisper
     networks:
       - whisper

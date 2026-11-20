@@ -45,6 +45,11 @@ ENV PATH=/opt/venv/bin:$PATH \
 USER 0
 RUN ["python3", "-c", "import glob, os, shutil\nd = '/usr/lib/python3/dist-packages/'\nnames = ('pip', 'pip-*.dist-info', 'setuptools', 'setuptools-*.dist-info', 'wheel', 'wheel-*.dist-info', '_distutils_hack', 'distutils-precedence.pth')\npaths = [p for n in names for p in glob.glob(d + n)] + [p for p in ('/usr/bin/pip', '/usr/bin/pip3') if os.path.lexists(p)]\nfor p in paths:\n    shutil.rmtree(p) if os.path.isdir(p) and not os.path.islink(p) else os.remove(p)\nprint('removed:', *sorted(paths))"]
 
+# The local backend's default storage directory, owned by whisper's user with
+# mode 700. Docker gives a new volume mounted here the same owner and mode;
+# without this it's owned by root and whisper can't write to it.
+RUN ["python3", "-c", "import os\nos.makedirs('/tmp/whisper', 0o700)\nos.chmod('/tmp/whisper', 0o700)\nos.chown('/tmp/whisper', 65534, 65534)"]
+
 COPY --from=build /opt/venv /opt/venv
 COPY --from=build /usr/src/app /usr/src/app
 
