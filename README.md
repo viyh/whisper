@@ -216,6 +216,19 @@ Or use built-in roles on the bucket: `roles/storage.objectUser` + `roles/storage
 
 Disable the bucket's soft delete policy and object versioning so deleted secrets are really gone.
 
+Whisper sets each object's custom time to when its secret expires. Give the bucket a lifecycle rule that deletes objects once that has passed, so expired secrets are deleted even when the in-app cleaner isn't running (e.g. Cloud Run scaled to zero). The [Terraform example](examples/terraform/gcp) sets this up. For an existing bucket, put the rules in a file and apply it with `gcloud storage buckets update gs://<bucket> --lifecycle-file=lifecycle.json`, which replaces the bucket's lifecycle rules:
+
+```json
+{
+    "rule": [
+        {"action": {"type": "Delete"}, "condition": {"daysSinceCustomTime": 0}},
+        {"action": {"type": "Delete"}, "condition": {"age": 31}}
+    ]
+}
+```
+
+The second rule deletes objects written by older versions, which have no custom time, after 31 days.
+
 ## Security Details
 
 ### Secret Structure

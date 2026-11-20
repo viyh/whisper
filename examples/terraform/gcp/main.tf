@@ -29,9 +29,24 @@ resource "google_storage_bucket" "secrets" {
     enabled = false
   }
 
-  # Backstop for the in-app cleaner, which may rarely run on Cloud Run because
-  # CPU is throttled between requests. Whisper keeps unread one-time secrets
-  # for 30 days, so this must be longer than that.
+  # The in-app cleaner may rarely run on Cloud Run, because CPU is throttled
+  # between requests and the service scales to zero. Whisper sets each
+  # object's customTime to when the secret expires, so this deletes expired
+  # secrets soon after (lifecycle actions run asynchronously) without it.
+  # Terraform drops a 0 unless it's told to send it.
+  lifecycle_rule {
+    condition {
+      days_since_custom_time = 0
+      send_days_since_custom_time_if_zero = true
+    }
+    action {
+      type = "Delete"
+    }
+  }
+
+  # Backstop for objects without a customTime, written by older versions.
+  # Whisper keeps unread one-time secrets for 30 days, so this must be longer
+  # than that.
   lifecycle_rule {
     condition {
       age = 31

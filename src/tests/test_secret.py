@@ -161,3 +161,23 @@ def test_is_expired_treats_damaged_dates_as_expired(expiration, dates):
     for name, value in dates.items():
         setattr(s, name, value)
     assert s.is_expired() is True
+
+
+def test_expires_at():
+    s = _make("1 hour")
+    assert s.expires_at() == s.expire_date
+    ot = _make("One time use")
+    assert ot.expires_at() == ot.create_date + 86400 * 30
+    ot.create_date = None
+    assert ot.expires_at() is None
+    s.expire_date = "soon"
+    assert s.expires_at() is None
+
+
+def test_is_locked_and_is_wiped():
+    s = _make("1 hour")
+    s.failed_attempts = 3
+    assert (s.is_locked(3), s.is_locked(4), s.is_locked(0)) == (True, False, False)
+    assert s.is_wiped() is False
+    s.data = s.hash = ""
+    assert s.is_wiped() is True

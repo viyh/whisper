@@ -1,4 +1,5 @@
 import copy
+import datetime
 import json
 import logging
 import posixpath
@@ -17,7 +18,8 @@ class gcs(store):
 
     Each secret is stored as ``<bucket_path>/<id>.json``, with its create and
     expire dates mirrored into custom object metadata so the cleaner can decide
-    on expiry from a bucket listing without downloading every object.
+    on expiry from a bucket listing without downloading every object. The
+    object's customTime is when it expires, for a bucket lifecycle rule.
 
     Concurrency relies on GCS object generations: new secrets are written with
     ``if_generation_match=0`` so an existing secret is never replaced, and
@@ -86,6 +88,12 @@ class gcs(store):
             "create_date": str(s.create_date),
             "expire_date": str(s.expire_date),
         }
+        expires_at = s.expires_at()
+        if expires_at is not None:
+            # A bucket lifecycle rule on daysSinceCustomTime deletes the object
+            # soon after it expires, even while the cleaner isn't running
+            # (e.g. Cloud Run scaled to zero). See the README.
+            blob.custom_time = datetime.datetime.fromtimestamp(expires_at, tz=datetime.UTC)
         blob.upload_from_string(
             json.dumps(s.__dict__),
             content_type="application/json",
