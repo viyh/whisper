@@ -40,6 +40,7 @@ class FakeBucket(requests.adapters.HTTPAdapter):
         self.content = content
         self.race = lambda method, query: None
         self.log = []
+        self.uploaded = None  # the object resource sent with the last upload
 
     def overwrite(self, content):
         self.generation += 1
@@ -68,8 +69,9 @@ class FakeBucket(requests.adapters.HTTPAdapter):
             if isinstance(content_type, str):
                 content_type = content_type.encode()
             boundary = content_type.split(b"boundary=")[1].strip(b'"')
-            media_part = request.body.split(b"--" + boundary)[2]
-            self.overwrite(media_part.split(b"\r\n\r\n", 1)[1].rstrip(b"\r\n"))
+            parts = request.body.split(b"--" + boundary)
+            self.uploaded = json.loads(parts[1].split(b"\r\n\r\n", 1)[1])
+            self.overwrite(parts[2].split(b"\r\n\r\n", 1)[1].rstrip(b"\r\n"))
             return 200, json.dumps(self._resource()).encode()
         # asking for a generation by number: gone once it's overwritten
         if not live or query.get("generation") not in (None, current):
@@ -96,8 +98,8 @@ class FakeBucket(requests.adapters.HTTPAdapter):
 @pytest.fixture
 def gcs_backend():
     s = secret()
-    s.create(secret_id=secrets.token_hex(32), expiration="1 hour", auth="a" * 64, key="k",
-             data="ciphertext")
+    s.create(secret_id=secrets.token_hex(32), expiration="One time use", auth="a" * 64,
+             key="k", data="ciphertext")
     fake = FakeBucket(f"secrets/{s.id}.json", json.dumps(s.__dict__).encode())
     # the session type the library uses itself, with the fake bucket as its transport
     session = AuthorizedSession(AnonymousCredentials())
@@ -126,41 +128,76 @@ def _overwrite_once(fake, method, alt=None, **changes):
     fake.race = race
 
 
-def test_claim_works_once(gcs_backend):
+def _store(backend):
+    from whisper.storage import store
+
+    st = store("whisper.storage.gcp.gcs")
+    st.backend = backend
+    return st
+
+
+def test_a_one_time_secret_opens_once_and_keeps_its_id(gcs_backend):
     backend, fake, s = gcs_backend
-    assert backend.claim_secret(s.id) is True
-    assert fake.content is None
-    assert backend.claim_secret(s.id) is False
+    st = _store(backend)
+    assert st.open_secret(s).data == "ciphertext"
+    stored = _stored(fake)
+    assert (stored["data"], stored["hash"]) == ("", "")
+    assert st.open_secret(s) is False
+    assert backend.set_secret(s) is False  # the ID stays taken
 
 
 def test_claim_after_an_overwrite_retries_instead_of_reporting_gone(gcs_backend):
     backend, fake, s = gcs_backend
-    _overwrite_once(fake, "DELETE", failed_attempts=1)
-    assert backend.claim_secret(s.id) is True
-    assert fake.content is None
+    _overwrite_once(fake, "POST", failed_attempts=1)
+    assert _store(backend).open_secret(s).data == "ciphertext"
+    assert _stored(fake)["data"] == ""
     assert not any("generation" in query for _, query in fake.log)
 
 
 def test_wrong_password_count_after_an_overwrite_mid_read(gcs_backend):
     backend, fake, s = gcs_backend
     _overwrite_once(fake, "GET", alt="media", failed_attempts=5)
-    assert backend.increment_failed_attempts(s) is True
+    assert _store(backend).record_failed_attempt(s) is True
     assert s.failed_attempts == 6
     assert _stored(fake)["failed_attempts"] == 6
 
 
 def test_wrong_password_count_after_an_overwrite_before_the_write(gcs_backend):
-    """Also a wipe: the count goes on top of it, the ciphertext stays gone."""
+    """Another count got in first: this one goes on top of it."""
     backend, fake, s = gcs_backend
-    _overwrite_once(fake, "POST", failed_attempts=10, data="", hash="")
-    assert backend.increment_failed_attempts(s) is True
-    stored = _stored(fake)
-    assert (stored["failed_attempts"], stored["data"], stored["hash"]) == (11, "", "")
+    _overwrite_once(fake, "POST", failed_attempts=5)
+    assert _store(backend).record_failed_attempt(s, max_failed_attempts=10) is True
+    assert _stored(fake)["failed_attempts"] == 6
     assert not any("generation" in query for _, query in fake.log)
 
 
-def test_wrong_password_count_for_a_claimed_secret(gcs_backend):
+def test_wrong_password_count_after_a_wipe_before_the_write(gcs_backend):
+    """The secret was locked and wiped meanwhile: nothing more is written,
+    and the ciphertext stays gone."""
     backend, fake, s = gcs_backend
-    assert backend.claim_secret(s.id) is True
-    assert backend.increment_failed_attempts(s) is False
+    _overwrite_once(fake, "POST", failed_attempts=10, data="", hash="")
+    assert _store(backend).record_failed_attempt(s, max_failed_attempts=10) is False
+    stored = _stored(fake)
+    assert (stored["failed_attempts"], stored["data"], stored["hash"]) == (10, "", "")
+    assert [m for m, _ in fake.log].count("POST") == 1  # the one that lost the race
+
+
+def test_wrong_password_count_for_a_deleted_secret(gcs_backend):
+    backend, fake, s = gcs_backend
+    assert backend.delete_secret(s.id) is True
+    assert _store(backend).record_failed_attempt(s) is False
     assert fake.content is None  # not recreated
+
+
+def test_uploads_send_the_expiry_as_custom_time(gcs_backend):
+    """For the bucket's daysSinceCustomTime lifecycle rule, which deletes
+    expired secrets even while the cleaner isn't running."""
+    import datetime
+
+    backend, fake, s = gcs_backend
+    assert _store(backend).record_failed_attempt(s) is True
+    sent = datetime.datetime.fromisoformat(fake.uploaded["customTime"])
+    assert sent.timestamp() == s.create_date + 86400 * 30  # one-time: kept 30 days
+    assert fake.uploaded["metadata"] == {
+        "create_date": str(s.create_date), "expire_date": str(s.expire_date),
+    }

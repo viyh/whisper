@@ -25,9 +25,9 @@ from whisper import (
     short_id,
 )
 from whisper.log_redaction import install_redaction
-from whisper.storage import store
+from whisper.storage import StorageBusy, store
 
-__version__ = "0.5.1"
+__version__ = "0.5.2"
 
 app = Flask("whisper")
 
@@ -192,6 +192,11 @@ def create_secret():
     return jsonify({"id": s.id})
 
 
+NOT_FOUND = "This secret doesn't exist, has expired, or was already viewed."
+LOCKED = "This secret has been locked due to too many failed attempts."
+TRY_AGAIN = "Too many attempts. Please try again later."
+
+
 @app.route(f"{config.app_url_base}retrieve", methods=["POST"])
 @limiter.limit("10 per minute")
 def retrieve_secret():
@@ -208,35 +213,65 @@ def retrieve_secret():
     s = store.get_secret(secret_id)
     if not s or s.version != CURRENT_SECRET_VERSION:
         app.logger.info(f"[{request.remote_addr}] Secret not found: {short_id(secret_id)}")
-        return jsonify({"result": "This secret doesn't exist, has expired, or was already viewed."})
+        return jsonify({"result": NOT_FOUND})
 
     # per-secret lock after max_failed_attempts wrong passwords (0 = off)
     max_failed = config.max_failed_attempts
-    if max_failed and s.failed_attempts >= max_failed:
+    if s.is_locked(max_failed):
         app.logger.info(f"[{request.remote_addr}] Secret locked: {short_id(s.id)}")
         if s.data or s.hash:
-            # locked by a version before 0.5.1, or the wipe lost a race
-            # with another write
+            # locked by an older version, which didn't wipe or wiped in a
+            # separate write that could fail
             store.wipe_secret(s.id)
-        return jsonify({"result": "This secret has been locked due to too many failed attempts."})
+        return jsonify({"result": LOCKED})
 
-    if not s.check_auth(data["auth"], config.secret_key):
-        app.logger.info(f"[{request.remote_addr}] Secret invalid password: {short_id(s.id)}")
-        if max_failed:
-            # never recreates a secret claimed by a concurrent request
-            store.record_failed_attempt(s)
-            if s.failed_attempts >= max_failed:
-                # it can never be opened now, so drop the ciphertext
-                store.wipe_secret(s.id)
-        return jsonify({"result": "Invalid password."})
+    # A one-time secret that was read keeps its record, without the
+    # ciphertext, until it expires. (So does a locked secret, if
+    # max_failed_attempts was raised since.)
+    if s.is_wiped():
+        app.logger.info(f"[{request.remote_addr}] Secret already viewed: {short_id(s.id)}")
+        return jsonify({"result": NOT_FOUND})
 
-    # for one-time secrets, atomically claim before returning data
-    if s.is_one_time() and not store.claim_secret(secret_id):
-        app.logger.info(f"[{request.remote_addr}] Secret already claimed: {short_id(secret_id)}")
-        return jsonify({"result": "This secret doesn't exist, has expired, or was already viewed."})
+    try:
+        if not s.check_auth(data["auth"], config.secret_key):
+            return _wrong_password(s, max_failed)
+        # checks the stored copy again: it may have been read or locked
+        # since s was read
+        opened = store.open_secret(s, max_failed)
+    except StorageBusy:
+        # other requests kept writing to this secret first, so nothing was
+        # counted or opened: say nothing about the password
+        app.logger.warning(f"[{request.remote_addr}] Secret busy: {short_id(s.id)}")
+        return jsonify({"result": TRY_AGAIN}), 429
+    if not opened:
+        return _no_longer_open(secret_id, max_failed)
 
     app.logger.info(f"[{request.remote_addr}] Secret retrieved: {short_id(s.id)}")
-    return jsonify({"encrypted_data": s.data, "version": s.version})
+    return jsonify({"encrypted_data": opened.data, "version": opened.version})
+
+
+def _wrong_password(s, max_failed):
+    app.logger.info(f"[{request.remote_addr}] Secret invalid password: {short_id(s.id)}")
+    # The attempt that reaches the limit also wipes the ciphertext, in the
+    # same write. Raises StorageBusy if not counted.
+    if max_failed and not store.record_failed_attempt(s, max_failed):
+        # Locked, read or deleted since s was read, so not counted. Answered
+        # as the right password is then, so a guess past the limit can't
+        # tell whether it was right.
+        return _no_longer_open(s.id, max_failed)
+    return jsonify({"result": "Invalid password."})
+
+
+def _no_longer_open(secret_id, max_failed):
+    """The answer for a secret that was read, locked or deleted since the
+    request first read it, whether the password was right or wrong:
+    "locked" if it's locked, otherwise "doesn't exist or already viewed"."""
+    current = store.get_secret(secret_id)
+    if current and current.is_locked(max_failed):
+        app.logger.info(f"[{request.remote_addr}] Secret locked: {short_id(secret_id)}")
+        return jsonify({"result": LOCKED})
+    app.logger.info(f"[{request.remote_addr}] Secret already viewed: {short_id(secret_id)}")
+    return jsonify({"result": NOT_FOUND})
 
 
 @app.route(f"{config.app_url_base}<string:secret_id>", methods=["GET", "POST"])
@@ -270,7 +305,7 @@ def request_entity_too_large(error):
 @app.errorhandler(429)
 def ratelimit_handler(error):
     return (
-        jsonify({"result": "Too many attempts. Please try again later."}),
+        jsonify({"result": TRY_AGAIN}),
         429,
     )
 
