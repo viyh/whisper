@@ -64,21 +64,31 @@ def test_delete_secret(backend):
     assert backend.get_secret(s.id) is False
 
 
-def test_claim_secret_is_atomic(backend):
-    """claim_secret is the one-shot retrieval primitive. The first caller
-    must win, and every subsequent caller must lose."""
-    s = _make_secret(expiration="One time use")
+def _add_one(stored):
+    stored.failed_attempts += 1
+    return stored
+
+
+def test_modify_secret_writes_the_change(backend):
+    s = _make_secret()
     backend.set_secret(s)
+    stored, written = backend.modify_secret(s.id, _add_one)
+    assert (stored.failed_attempts, written.failed_attempts) == (0, 1)
+    assert backend.get_secret(s.id).failed_attempts == 1
+    written.failed_attempts = 5  # the caller's copy, not stored state
+    assert backend.get_secret(s.id).failed_attempts == 1
 
-    assert backend.claim_secret(s.id) is True
-    # Second attempt - the secret is gone.
-    assert backend.claim_secret(s.id) is False
-    # And a regular get should also fail.
-    assert backend.get_secret(s.id) is False
+
+def test_modify_secret_can_leave_it(backend):
+    s = _make_secret()
+    backend.set_secret(s)
+    stored, written = backend.modify_secret(s.id, lambda stored: None)
+    assert (stored.__dict__, written) == (s.__dict__, None)
 
 
-def test_claim_nonexistent_secret_returns_false(backend):
-    assert backend.claim_secret("b" * 40) is False
+def test_modify_missing_secret(backend):
+    assert backend.modify_secret("b" * 64, _add_one) == (None, None)
+    assert backend.get_secret("b" * 64) is False  # not created
 
 
 def test_delete_expired_removes_expired_entries(backend):
@@ -117,7 +127,7 @@ def test_failed_attempts_count_atomically(backend):
 
     def wrong_password():
         start.wait()
-        assert backend.increment_failed_attempts(backend.get_secret(s.id)) is True
+        assert backend.modify_secret(s.id, _add_one)[1]
 
     threads = [threading.Thread(target=wrong_password) for _ in range(20)]
     for t in threads:
@@ -125,4 +135,3 @@ def test_failed_attempts_count_atomically(backend):
     for t in threads:
         t.join()
     assert backend.get_secret(s.id).failed_attempts == 20
-    assert backend.increment_failed_attempts(_make_secret()) is False  # not stored

@@ -47,26 +47,22 @@ class memory(store):
         logger.debug(f"Updating memory secret: {short_id(s.id)}")
         return True
 
-    def increment_failed_attempts(self, s):
-        """Count a wrong password atomically (under the lock)."""
+    def modify_secret(self, secret_id, change):
+        """Change a stored secret atomically (under the lock)."""
         with self._lock:
-            stored = self.secrets.get(s.id)
+            stored = self.secrets.get(secret_id)
             if not stored:
-                return False
-            stored.failed_attempts += 1
-            s.failed_attempts = stored.failed_attempts
-        return True
+                return None, None
+            changed = change(copy.copy(stored))
+            if changed is not None:
+                self.secrets[secret_id] = copy.copy(changed)
+        return copy.copy(stored), changed
 
     def delete_secret(self, secret_id):
         logger.info(f"Deleting memory secret: {short_id(secret_id)}")
         with self._lock:
             self.secrets.pop(secret_id, None)
         return True
-
-    def claim_secret(self, secret_id):
-        """Atomically remove a one-time secret. Returns True if this caller won."""
-        with self._lock:
-            return self.secrets.pop(secret_id, None) is not None
 
     def delete_expired(self):
         with self._lock:

@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.2] - 2026-11-19
+
+### Security
+* A one-time secret that was read keeps its record, without the ciphertext, until 30 days after it was made. Before, its ID was free again, so anyone with the link and the password could read the secret, then store it (or something else) under the same link, and the recipient would see no sign it had been opened.
+* A right password no longer opens a secret that wrong passwords locked after the request read it: the stored secret is checked again just before its ciphertext is returned. A guess made after the lock is answered "locked" whether it's right or wrong, so it can't tell. Guesses handled at the same moment as the limit is reached are still checked, so a burst of guesses can test a few more than `max_failed_attempts`, up to the number of requests the servers handle at once.
+* The wrong password that reaches `max_failed_attempts` wipes the ciphertext in the same write as the count. Wrong passwords for a secret that is already locked or read write nothing; before, they kept writing higher counts, and one racing a one-time secret's reading could make its link answer "locked" instead of "already viewed".
+* S3 and GCS: a request whose write keeps losing to other writes to the same secret (5 times in a row) is answered "try again later" (429) instead of "Invalid password." or "already viewed", so a guess that wasn't counted reveals nothing.
+* S3 and GCS: a one-time claim overwrites the secret with its record instead of deleting it, so it no longer relies on how a conditional delete of an already deleted object is answered.
+* Local backend: rewriting a secret file no longer writes through an existing `<id>.json.tmp`; it removes it and creates a new one exclusively. On a shared host, another user who created the storage directory first (e.g. `/tmp/whisper`) could link that file to any file Whisper can write and have it overwritten. Secret files aren't read through a link either.
+* Local backend: Whisper warns at startup if the storage directory isn't private to its user (owned by another user, or open to group or others), and refuses a storage path that isn't a directory or is a symbolic link (whoever owns the link can point it elsewhere at any time).
+* GCS: each object's custom time is set to when its secret expires, and the GCP Terraform example deletes objects once it has passed (`days_since_custom_time = 0`). Expired secrets were only deleted by the in-app cleaner, which rarely runs on Cloud Run, so they could stay in the bucket for up to 31 days. For an existing bucket, add the rule as shown in the README.
+
+### Changed
+* Storage backends implement `modify_secret()` instead of `claim_secret()` and `increment_failed_attempts()` (see Writing Storage Backends in the README).
+
+### Fixed
+* Wiping a locked secret is a compare-and-swap too, so it can't undo a wrong-password count written at the same moment.
+* The local backend couldn't store secrets in a Docker volume as shown in the README: Docker created the volume owned by root, and Whisper runs as uid 65534. The image now has `/tmp/whisper` owned by uid 65534 with mode 700, which a new volume mounted there takes on. A volume created before this is still owned by root: recreate it. For a host directory (bind mount, as in the Compose example), the README shows how to create it.
+
 ## [0.5.1] - 2026-11-19
 
 ### Security

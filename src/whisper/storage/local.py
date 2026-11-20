@@ -1,11 +1,13 @@
+import copy
 import glob
 import json
 import logging
 import os
+import stat
 import threading
 import time
 
-from whisper import secret, short_id
+from whisper import ConfigError, secret, short_id
 from whisper.storage import store
 
 logger = logging.getLogger(__name__)
@@ -16,6 +18,11 @@ UNREADABLE_GRACE_SECONDS = 60
 
 #: Suffix of the temp file a rewrite writes before replacing the secret file
 TMP_SUFFIX = ".tmp"
+
+
+def _no_follow(path, flags):
+    """open() opener that refuses a link where a secret file should be."""
+    return os.open(path, flags | getattr(os, "O_NOFOLLOW", 0))
 
 
 class local(store):
@@ -33,10 +40,32 @@ class local(store):
         super().__init__(name, parent)
 
     def start(self):
-        if not os.path.exists(self.config.path):
+        path = self.config.path
+        try:
             # owner-only: a directory listing shows every stored secret's ID
-            os.makedirs(self.config.path, mode=0o700)
-            logger.info(f"Created directory {self.config.path}")
+            os.makedirs(path, mode=0o700)
+            logger.info(f"Created directory {path}")
+        except FileExistsError:
+            pass
+        # lstat: the path itself, not where a link points. Whoever owns a
+        # link (e.g. one another user made at /tmp/whisper) can point it
+        # elsewhere at any time. Without trailing slashes, which would make
+        # lstat follow the link.
+        info = os.lstat(path.rstrip(os.sep) or os.sep)
+        if stat.S_ISLNK(info.st_mode):
+            raise ConfigError("path", "Storage path is a symbolic link; set it to the directory itself")
+        if not stat.S_ISDIR(info.st_mode):
+            raise ConfigError("path", "Storage path is not a directory")
+        # e.g. /tmp/whisper created by another user first, or a mounted
+        # directory others can write to
+        if info.st_uid != os.geteuid() or info.st_mode & 0o077:
+            logger.warning(
+                f"Storage directory {path} isn't private to whisper's user (uid "
+                f"{os.geteuid()}): it's owned by uid {info.st_uid} with mode "
+                f"{stat.S_IMODE(info.st_mode):o}. Others who can use it can list, "
+                "delete or replace stored secrets. Make it owned by whisper's "
+                "user, with mode 700."
+            )
 
     def _filename(self, secret_id):
         return os.path.join(self.config.path, f"{secret_id}.json")
@@ -67,8 +96,8 @@ class local(store):
         return True
 
     def update_secret(self, s):
-        """Rewrite an existing secret file. Opening without O_CREAT fails if the
-        file was claimed/deleted, so a claimed secret is never recreated."""
+        """Rewrite an existing secret file. A deleted secret is never
+        recreated."""
         if not s.check_id():
             return False
         with self._lock:
@@ -77,13 +106,21 @@ class local(store):
     def _rewrite(self, s):
         """Replace an existing secret file with a complete new one, so a
         crash or full disk mid-write leaves the old file intact. Callers hold
-        the lock, which claims and deletes also take, so a secret that is gone
-        stays gone."""
+        the lock, which deletes also take, so a secret that is gone stays
+        gone."""
         filename = self._filename(s.id)
         if not os.path.exists(filename):
             return False
         tmp_filename = filename + TMP_SUFFIX
-        fd = os.open(tmp_filename, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        # Never write through an existing temp file: a leftover from a crash,
+        # or a link someone planted to make this write over another file.
+        # Remove it and create a new one. O_EXCL refuses a link put back in
+        # between instead of following it.
+        try:
+            os.remove(tmp_filename)
+        except FileNotFoundError:
+            pass
+        fd = os.open(tmp_filename, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         try:
             with os.fdopen(fd, "w") as tmp_file:
                 json.dump(s.__dict__, tmp_file)
@@ -97,20 +134,23 @@ class local(store):
         logger.debug(f"Updating secret: {short_id(s.id)}")
         return True
 
-    def increment_failed_attempts(self, s):
-        """Count a wrong password atomically: re-read the stored count under
-        the lock, so concurrent wrong passwords each count."""
+    def modify_secret(self, secret_id, change):
+        """Change a stored secret atomically: read, change and rewrite it under
+        the lock, so simultaneous changes (wrong passwords counted at the same
+        moment, a claim) never undo one another."""
+        s = secret(secret_id)
         if not s.check_id():
-            return False
+            return None, None
         with self._lock:
             stored = self.secret_from_file(self._filename(s.id))
             if not stored:
-                return False
-            stored.failed_attempts += 1
-            if not self._rewrite(stored):
-                return False
-        s.failed_attempts = stored.failed_attempts
-        return True
+                return None, None
+            changed = change(copy.copy(stored))
+            if changed is None:
+                return stored, None
+            if not self._rewrite(changed):
+                return None, None
+        return stored, changed
 
     def delete_secret(self, secret_id):
         s = secret(secret_id)
@@ -120,30 +160,17 @@ class local(store):
             with self._lock:
                 os.remove(self._filename(s.id))
         except FileNotFoundError:
-            # already gone (claimed, or deleted by a concurrent cleanup)
+            # already gone (deleted by a concurrent cleanup)
             return True
         logger.info(f"Deleting secret: {short_id(secret_id)}")
         return True
-
-    def claim_secret(self, secret_id):
-        """Atomically claim a one-time secret: of several callers removing the
-        same file, exactly one succeeds."""
-        s = secret(secret_id)
-        if not s.check_id():
-            return False
-        with self._lock:
-            try:
-                os.remove(self._filename(s.id))
-                return True
-            except FileNotFoundError:
-                return False
 
     def secret_from_file(self, secret_filename):
         if not os.path.exists(secret_filename):
             return False
         s = secret()
         try:
-            with open(secret_filename) as secret_file:
+            with open(secret_filename, opener=_no_follow) as secret_file:
                 s.load_from_dict(json.load(secret_file))
         except (OSError, ValueError) as e:
             reason = (e.strerror or type(e).__name__) if isinstance(e, OSError) else e

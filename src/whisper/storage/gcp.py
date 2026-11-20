@@ -1,3 +1,5 @@
+import copy
+import datetime
 import json
 import logging
 import posixpath
@@ -6,7 +8,7 @@ from google.api_core.exceptions import NotFound, PreconditionFailed
 from google.cloud import storage
 
 from whisper import secret, short_id
-from whisper.storage import CAS_ATTEMPTS, store
+from whisper.storage import CAS_ATTEMPTS, StorageBusy, store
 
 logger = logging.getLogger(__name__)
 
@@ -16,15 +18,17 @@ class gcs(store):
 
     Each secret is stored as ``<bucket_path>/<id>.json``, with its create and
     expire dates mirrored into custom object metadata so the cleaner can decide
-    on expiry from a bucket listing without downloading every object.
+    on expiry from a bucket listing without downloading every object. The
+    object's customTime is when it expires, for a bucket lifecycle rule.
 
     Concurrency relies on GCS object generations: new secrets are written with
-    ``if_generation_match=0`` so an existing secret is never replaced, a
-    one-time claim deletes with ``if_generation_match`` so exactly one caller
-    wins, and updates write with ``if_generation_match`` so a claimed secret
-    is never recreated. Wrong passwords are counted with a compare-and-swap
-    against the generation of the copy that was read, and a claim that loses
-    to a wrong-password write retries.
+    ``if_generation_match=0`` so an existing secret is never replaced, and
+    updates write with ``if_generation_match`` so a deleted secret is never
+    recreated. Changes (wrong-password counts, one-time claims, wipes) are a
+    compare-and-swap against the generation of the copy that was read,
+    retried if another write got in first. A claim replaces the secret with
+    its wiped record, so exactly one caller wins: the losers find the wiped
+    record.
 
     The client library retries reads, deletes and generation-conditioned writes
     on transient errors; other errors propagate. The cleaner thread logs and
@@ -84,6 +88,12 @@ class gcs(store):
             "create_date": str(s.create_date),
             "expire_date": str(s.expire_date),
         }
+        expires_at = s.expires_at()
+        if expires_at is not None:
+            # A bucket lifecycle rule on daysSinceCustomTime deletes the object
+            # soon after it expires, even while the cleaner isn't running
+            # (e.g. Cloud Run scaled to zero). See the README.
+            blob.custom_time = datetime.datetime.fromtimestamp(expires_at, tz=datetime.UTC)
         blob.upload_from_string(
             json.dumps(s.__dict__),
             content_type="application/json",
@@ -103,7 +113,7 @@ class gcs(store):
 
     def update_secret(self, s):
         """Overwrite only if the object still exists, pinned to its current
-        generation so a concurrent claim/delete makes this a no-op."""
+        generation so a concurrent delete makes this a no-op."""
         if not s.check_id():
             return False
         blob = self.bucket.get_blob(self._path(s.id))
@@ -124,19 +134,19 @@ class gcs(store):
             pass
         return True
 
-    def increment_failed_attempts(self, s):
-        """Count a wrong password with a compare-and-swap: write the stored
-        copy plus one, pinned to the generation it was read at. If another
-        write got in first, read again and retry, so simultaneous wrong
-        passwords each count and nothing written in between (e.g. a wipe) is
-        undone."""
-        if not s.check_id():
-            return False
-        path = self._path(s.id)
+    def modify_secret(self, secret_id, change):
+        """Change a stored secret with a compare-and-swap: write change()'s
+        result pinned to the generation the secret was read at. If another
+        write got in first, read again and retry, so simultaneous changes
+        (wrong passwords counted at the same moment, a claim, a wipe) never
+        undo one another. Raises StorageBusy after CAS_ATTEMPTS lost races."""
+        if not secret(secret_id).check_id():
+            return None, None
+        path = self._path(secret_id)
         for _ in range(CAS_ATTEMPTS):
             blob = self.bucket.get_blob(path)
             if blob is None:
-                return False
+                return None, None
             generation = blob.generation
             try:
                 # The content of exactly the generation looked up. A fresh,
@@ -145,47 +155,24 @@ class gcs(store):
                 # once it was overwritten, instead of a precondition failure.
                 raw = self.bucket.blob(path).download_as_bytes(if_generation_match=generation)
             except NotFound:
-                return False
+                return None, None
             except PreconditionFailed:
                 continue  # replaced between the two calls
-            stored = self._parse(raw, s.id)
+            stored = self._parse(raw, secret_id)
             if not stored:
-                return False
-            stored.failed_attempts += 1
+                return None, None
+            changed = change(copy.copy(stored))
+            if changed is None:
+                return stored, None
             try:
-                self._upload(stored, if_generation_match=generation)
+                self._upload(changed, if_generation_match=generation)
             except NotFound:
-                return False
+                return None, None
             except PreconditionFailed:
-                continue  # changed (or claimed) since the read: look again
-            s.failed_attempts = stored.failed_attempts
-            return True
-        logger.warning(f"Too many concurrent writes, wrong password not counted: {short_id(s.id)}")
-        return False
-
-    def claim_secret(self, secret_id):
-        """Atomically claim a one-time secret by deleting it pinned to its
-        generation, so exactly one caller wins. If a wrong-password write
-        changed the object in between, it is still there to claim: look
-        again."""
-        if not secret(secret_id).check_id():
-            return False
-        path = self._path(secret_id)
-        for _ in range(CAS_ATTEMPTS):
-            blob = self.bucket.get_blob(path)
-            if blob is None:
-                return False
-            try:
-                # by name, not blob.delete(): that targets the looked-up
-                # generation by number (see increment_failed_attempts)
-                self.bucket.delete_blob(path, if_generation_match=blob.generation)
-            except NotFound:
-                return False
-            except PreconditionFailed:
-                continue  # changed since the lookup
-            return True
-        logger.warning(f"Too many concurrent writes, claim given up: {short_id(secret_id)}")
-        return False
+                continue  # changed (or deleted) since the read: look again
+            return stored, changed
+        logger.warning(f"Too many concurrent writes, change not made: {short_id(secret_id)}")
+        raise StorageBusy()
 
     def delete_expired(self):
         for blob in self.client.list_blobs(self.bucket, prefix=self._list_prefix()):

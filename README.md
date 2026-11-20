@@ -20,7 +20,7 @@ sequenceDiagram
     S-->>R: Password, sent separately
     Note over R: Derives the ID, auth token and key<br/>from the link token + password
     R->>W: ID, auth token
-    W->>R: Ciphertext, if the HMAC matches<br/>(one-time secrets are deleted)
+    W->>R: Ciphertext, if the HMAC matches<br/>(then deleted, for a one-time secret)
     Note over R: Decrypts with the encryption key
     Note over W: Never sees the password,<br/>the link token or the secret
 ```
@@ -39,7 +39,7 @@ Whisper uses a layered security approach:
 
 - **Client-side encryption**: Secrets are encrypted with AES-256-GCM (Web Crypto API) before leaving the browser. The server never has access to plaintext data or passwords.
 - **The link and the password are both needed**: Each link ends in a random token after the `#`, which browsers never send to servers. The browser derives the encryption key from the password with Argon2id (WASM), salted with the token, and the server stores each secret under a hash of the token. The server, its storage and its logs can't decrypt a secret or tell which link it belongs to, and a copy of the storage is useless without the links, even with `secret_key`.
-- **One-time secrets**: Deleted atomically after retrieval -- concurrent requests cannot both succeed. Unread one-time secrets are deleted after 30 days.
+- **One-time secrets**: The ciphertext is deleted atomically on retrieval, so concurrent requests can't both get it. The rest of the record is kept until 30 days after the secret was made, so its link can't be used for a new secret. Unread one-time secrets are deleted after 30 days.
 - **Rate limiting**: per IP, 10 attempts a minute to open secrets and 30 new secrets a minute (`create_rate_limit`), plus a per-secret lock after 10 wrong passwords (`max_failed_attempts`). Behind a load balancer, set `trusted_proxy_count` (see [Running Behind a Proxy](#running-behind-a-proxy)).
 - **Strict CSP**: No inline scripts or styles, and nothing is loaded from other sites.
 
@@ -52,14 +52,14 @@ See [Security Details](#security-details) for the full cryptographic design, and
 export SECRET_KEY=$(head /dev/urandom | LC_ALL=C tr -dc 'A-Za-z0-9' | head -c 48)
 sed "s/CHANGE_ME_TO_A_RANDOM_STRING_OF_32_OR_MORE_CHARACTERS/$SECRET_KEY/" src/config.default.yaml > config.yaml
 
-# Build from source (optional, can also pull viyh/whisper:0.5.1).
+# Build from source (optional, can also pull viyh/whisper:0.5.2).
 # The base images need a free Docker account: docker login dhi.io
 # docker build -t viyh/whisper .
 
 # Run
 docker run -d --name whisper -p 8000:8000 \
     -v $(pwd)/config.yaml:/usr/src/app/config.yaml \
-    viyh/whisper:0.5.1
+    viyh/whisper:0.5.2
 ```
 
 Browse to http://localhost:8000
@@ -131,7 +131,7 @@ Use the GCS or S3 backend on Cloud Run or ECS; local and in-memory storage lose 
 
 ### Local Disk (default)
 
-Stores secrets as JSON files. Mount a volume for persistence.
+Stores secrets as JSON files. Mount a volume for persistence. The directory should be owned by the user Whisper runs as (uid 65534 in the image), with mode 700. Whisper warns at startup if others can use it, and refuses a path that is a symbolic link. A new Docker volume, as below, starts out that way. For a host directory (a bind mount), create it first: `sudo install -d -o 65534 -g 65534 -m 700 /path/to/data`.
 
 ```yaml
 storage_class: whisper.storage.local.local
@@ -216,6 +216,19 @@ Or use built-in roles on the bucket: `roles/storage.objectUser` + `roles/storage
 
 Disable the bucket's soft delete policy and object versioning so deleted secrets are really gone.
 
+Whisper sets each object's custom time to when its secret expires. Give the bucket a lifecycle rule that deletes objects once that has passed, so expired secrets are deleted even when the in-app cleaner isn't running (e.g. Cloud Run scaled to zero). The [Terraform example](examples/terraform/gcp) sets this up. For an existing bucket, put the rules in a file and apply it with `gcloud storage buckets update gs://<bucket> --lifecycle-file=lifecycle.json`, which replaces the bucket's lifecycle rules:
+
+```json
+{
+    "rule": [
+        {"action": {"type": "Delete"}, "condition": {"daysSinceCustomTime": 0}},
+        {"action": {"type": "Delete"}, "condition": {"age": 31}}
+    ]
+}
+```
+
+The second rule deletes objects written by older versions, which have no custom time, after 31 days.
+
 ## Security Details
 
 ### Secret Structure
@@ -255,7 +268,7 @@ Disable the bucket's soft delete policy and object versioning so deleted secrets
 **Opening a secret:**
 1. The browser takes the token from the link and derives the ID, auth token and key from it and the password, as above.
 2. It sends the ID and the auth token. The server compares HMACs in constant time, and counts wrong passwords toward `max_failed_attempts`.
-3. For one-time secrets: atomic claim-and-delete before returning data.
+3. Just before returning the ciphertext, the server checks the stored secret again, so wrong passwords counted meanwhile still lock it. A one-time secret is claimed atomically: its ciphertext and HMAC are deleted, and the rest of the record is kept until it expires, so its ID can't be used again.
 4. The browser decrypts the secret and removes the token from the address bar and history.
 
 The server **never** sees the plaintext, the password, or the link token. Someone with a copy of the storage and `secret_key` but not the link can't decrypt a secret or guess its password offline, since the token is the Argon2id salt.
@@ -282,9 +295,8 @@ Storage backends must subclass `store` and implement:
 | `get_secret(secret_id)` | Return secret object or `False`. |
 | `set_secret(s)` | Save a new secret. Never overwrite: atomically return `False` without writing if one with that ID exists (IDs come from the browser). |
 | `delete_secret(secret_id)` | Delete a secret. |
-| `update_secret(s)` | Save changes to an existing secret; return `False` without writing if it no longer exists (never recreates a claimed secret). |
-| `claim_secret(secret_id)` | Atomically delete and return `True` if it existed (for one-time secrets). |
-| `increment_failed_attempts(s)` | Optional. Add one to the stored `failed_attempts`; return `False` if the secret no longer exists. The default does it through `update_secret`; override it to count atomically. |
+| `update_secret(s)` | Save changes to an existing secret; return `False` without writing if it no longer exists (never recreates a deleted secret). |
+| `modify_secret(secret_id, change)` | Optional. Replace a stored secret with `change(copy)`, which returns the secret to write or `None` to leave it. Return `(stored, written)`, or `(None, None)` if it doesn't exist. Counts wrong passwords, claims one-time secrets and wipes locked ones. The default does it through `get_secret` and `update_secret`; override it to make it atomic, raising `StorageBusy` if it keeps losing to other writes. |
 | `delete_expired()` | Iterate stored secrets and delete any where `is_expired()` returns `True`. |
 
 See `src/whisper/storage/memory.py` for a minimal example.
@@ -305,11 +317,11 @@ The image builds on [Docker Hardened Images](https://dhi.io), which are free but
 
 ```bash
 # Standard build
-docker build -t whisper:0.5.1 .
+docker build -t whisper:0.5.2 .
 
 # Cross-platform build
 docker buildx build --platform=linux/amd64,linux/arm64 \
-    -t whisper:0.5.1 .
+    -t whisper:0.5.2 .
 ```
 
 ### Tech Stack
