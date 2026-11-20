@@ -137,6 +137,26 @@ def test_a_storage_path_that_is_not_a_directory_is_refused(tmp_path):
         _start(tmp_path / "store")
 
 
+@pytest.mark.parametrize("suffix", ["", "/", "//"])
+def test_a_symlinked_storage_directory_is_refused(tmp_path, suffix):
+    """Even to a private directory: whoever owns the link (e.g. another user
+    who made /tmp/whisper) can point it elsewhere at any time. Also with a
+    trailing slash in the configured path, which makes lstat follow it."""
+    from whisper import ConfigError
+
+    os.mkdir(tmp_path / "private", 0o700)
+    os.symlink(tmp_path / "private", tmp_path / "store")
+    with pytest.raises(ConfigError, match="symbolic link"):
+        _start(f"{tmp_path / 'store'}{suffix}")
+
+
+def test_a_trailing_slash_on_a_real_directory_is_fine(tmp_path, caplog):
+    os.mkdir(tmp_path / "store", 0o700)
+    with caplog.at_level("WARNING"):
+        _start(f"{tmp_path / 'store'}/")
+    assert not caplog.records
+
+
 def test_a_rewrite_does_not_write_through_a_planted_link(backend, tmp_path):
     """Another local user who controls the directory could link the
     predictable temp file to any file whisper can write."""

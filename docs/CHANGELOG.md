@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * S3 and GCS: a request whose write keeps losing to other writes to the same secret (5 times in a row) is answered "try again later" (429) instead of "Invalid password." or "already viewed", so a guess that wasn't counted reveals nothing.
 * S3 and GCS: a one-time claim overwrites the secret with its record instead of deleting it, so it no longer relies on how a conditional delete of an already deleted object is answered.
 * Local backend: rewriting a secret file no longer writes through an existing `<id>.json.tmp`; it removes it and creates a new one exclusively. On a shared host, another user who created the storage directory first (e.g. `/tmp/whisper`) could link that file to any file Whisper can write and have it overwritten. Secret files aren't read through a link either.
-* Local backend: Whisper warns at startup if the storage directory isn't private to its user (owned by another user, or open to group or others), and refuses a storage path that isn't a directory.
+* Local backend: Whisper warns at startup if the storage directory isn't private to its user (owned by another user, or open to group or others), and refuses a storage path that isn't a directory or is a symbolic link (whoever owns the link can point it elsewhere at any time).
 * GCS: each object's custom time is set to when its secret expires, and the GCP Terraform example deletes objects once it has passed (`days_since_custom_time = 0`). Expired secrets were only deleted by the in-app cleaner, which rarely runs on Cloud Run, so they could stay in the bucket for up to 31 days. For an existing bucket, add the rule as shown in the README.
 
 ### Changed
