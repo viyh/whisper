@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.5.2] - 2026-11-19
 
 ### Security
 * A one-time secret that was read keeps its record, without the ciphertext, until 30 days after it was made. Before, its ID was free again, so anyone with the link and the password could read the secret, then store it (or something else) under the same link, and the recipient would see no sign it had been opened.
