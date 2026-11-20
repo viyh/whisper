@@ -228,15 +228,20 @@ def test_expired_secret_cannot_be_retrieved_before_cleanup(client, app_module):
     assert "encrypted_data" not in _retrieve(client, sid).get_json()
 
 
-def test_failed_attempt_does_not_bring_back_a_claimed_secret(client, app_module):
-    """A wrong-password request that loaded the secret before a concurrent
-    successful claim counts on the claimed record, without the ciphertext."""
+def test_a_wrong_password_racing_a_claim_answers_already_viewed(client, app_module, monkeypatch):
+    """It read the secret before the recipient claimed it. It isn't counted
+    on the claimed record, which would otherwise answer "locked" later if it
+    reached the limit, and it gets the same answer as the right password."""
+    monkeypatch.setitem(app_module.config, "max_failed_attempts", 1)
     _, sid = _create(client)
-    loaded = app_module.store.get_secret(sid)  # wrong-password request reads...
-    assert _retrieve(client, sid).get_json()["encrypted_data"]  # ...recipient claims...
-    assert app_module.store.record_failed_attempt(loaded) is True  # ...then it counts
+    stale = app_module.store.get_secret(sid)  # the wrong password's request reads...
+    assert _retrieve(client, sid).get_json()["encrypted_data"]  # ...the recipient claims
+    _first_read_from_before(app_module, monkeypatch, stale)
+    assert "already viewed" in _retrieve(client, sid, BAD_AUTH).get_json()["result"]
+    monkeypatch.undo()
     stored = app_module.store.get_secret(sid)
-    assert (stored.data, stored.hash, stored.failed_attempts) == ("", "", 1)
+    assert (stored.data, stored.hash, stored.failed_attempts) == ("", "", 0)
+    assert "already viewed" in _retrieve(client, sid).get_json()["result"]
 
 
 def _first_read_from_before(app_module, monkeypatch, stale):
@@ -270,7 +275,7 @@ def test_a_wrong_password_after_the_lock_answers_locked(client, app_module, monk
         _retrieve(client, sid, BAD_AUTH)
     _first_read_from_before(app_module, monkeypatch, stale)
     assert "locked" in _retrieve(client, sid, BAD_AUTH).get_json()["result"]
-    assert app_module.store.get_secret(sid).failed_attempts == 11
+    assert app_module.store.get_secret(sid).failed_attempts == 10  # nothing written
 
 
 @pytest.mark.parametrize("auth", [GOOD_AUTH, BAD_AUTH])

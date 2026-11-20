@@ -207,3 +207,36 @@ def test_default_modify_secret_for_other_backends():
     assert st.open_secret(st.get_secret(s.id)).failed_attempts == 1
     assert st.get_secret(s.id).is_wiped()
     assert st.backend.modify_secret("b" * 64, lambda stored: stored) == (None, None)
+
+
+def test_the_attempt_that_reaches_the_limit_wipes_in_the_same_write(st, monkeypatch):
+    s = _make_secret()
+    st.set_secret(s)
+    for _ in range(2):
+        assert st.record_failed_attempt(st.get_secret(s.id), max_failed_attempts=3) is True
+    writes = []
+    real = st.backend.modify_secret
+    monkeypatch.setattr(st.backend, "modify_secret", lambda *a: writes.append(1) or real(*a))
+    loaded = st.get_secret(s.id)
+    assert st.record_failed_attempt(loaded, max_failed_attempts=3) is True
+    assert loaded.failed_attempts == 3 and len(writes) == 1
+    stored = st.get_secret(s.id)
+    assert (stored.data, stored.hash, stored.failed_attempts) == ("", "", 3)
+
+
+@pytest.mark.parametrize("state", ["locked", "read"])
+def test_no_count_is_written_for_a_secret_that_cant_be_opened(st, state):
+    """Not past the limit (contention for nothing), and not on a one-time
+    secret's kept record (it would answer "locked" instead of "already
+    viewed")."""
+    s = _make_secret("One time use")
+    st.set_secret(s)
+    stale = st.get_secret(s.id)
+    if state == "locked":
+        for _ in range(3):
+            st.record_failed_attempt(st.get_secret(s.id), max_failed_attempts=3)
+    else:
+        assert st.open_secret(st.get_secret(s.id))
+    before = st.get_secret(s.id).__dict__
+    assert st.record_failed_attempt(stale, max_failed_attempts=3) is False
+    assert st.get_secret(s.id).__dict__ == before
