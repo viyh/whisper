@@ -3,10 +3,11 @@ import glob
 import json
 import logging
 import os
+import stat
 import threading
 import time
 
-from whisper import secret, short_id
+from whisper import ConfigError, secret, short_id
 from whisper.storage import store
 
 logger = logging.getLogger(__name__)
@@ -17,6 +18,11 @@ UNREADABLE_GRACE_SECONDS = 60
 
 #: Suffix of the temp file a rewrite writes before replacing the secret file
 TMP_SUFFIX = ".tmp"
+
+
+def _no_follow(path, flags):
+    """open() opener that refuses a link where a secret file should be."""
+    return os.open(path, flags | getattr(os, "O_NOFOLLOW", 0))
 
 
 class local(store):
@@ -34,10 +40,26 @@ class local(store):
         super().__init__(name, parent)
 
     def start(self):
-        if not os.path.exists(self.config.path):
+        path = self.config.path
+        try:
             # owner-only: a directory listing shows every stored secret's ID
-            os.makedirs(self.config.path, mode=0o700)
-            logger.info(f"Created directory {self.config.path}")
+            os.makedirs(path, mode=0o700)
+            logger.info(f"Created directory {path}")
+        except FileExistsError:
+            pass
+        info = os.stat(path)
+        if not stat.S_ISDIR(info.st_mode):
+            raise ConfigError("path", "Storage path is not a directory")
+        # e.g. /tmp/whisper created by another user first, or a mounted
+        # directory others can write to
+        if info.st_uid != os.geteuid() or info.st_mode & 0o077:
+            logger.warning(
+                f"Storage directory {path} isn't private to whisper's user (uid "
+                f"{os.geteuid()}): it's owned by uid {info.st_uid} with mode "
+                f"{stat.S_IMODE(info.st_mode):o}. Others who can use it can list, "
+                "delete or replace stored secrets. Make it owned by whisper's "
+                "user, with mode 700."
+            )
 
     def _filename(self, secret_id):
         return os.path.join(self.config.path, f"{secret_id}.json")
@@ -84,7 +106,15 @@ class local(store):
         if not os.path.exists(filename):
             return False
         tmp_filename = filename + TMP_SUFFIX
-        fd = os.open(tmp_filename, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        # Never write through an existing temp file: a leftover from a crash,
+        # or a link someone planted to make this write over another file.
+        # Remove it and create a new one. O_EXCL refuses a link put back in
+        # between instead of following it.
+        try:
+            os.remove(tmp_filename)
+        except FileNotFoundError:
+            pass
+        fd = os.open(tmp_filename, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         try:
             with os.fdopen(fd, "w") as tmp_file:
                 json.dump(s.__dict__, tmp_file)
@@ -134,7 +164,7 @@ class local(store):
             return False
         s = secret()
         try:
-            with open(secret_filename) as secret_file:
+            with open(secret_filename, opener=_no_follow) as secret_file:
                 s.load_from_dict(json.load(secret_file))
         except (OSError, ValueError) as e:
             reason = (e.strerror or type(e).__name__) if isinstance(e, OSError) else e

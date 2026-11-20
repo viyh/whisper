@@ -131,7 +131,7 @@ Use the GCS or S3 backend on Cloud Run or ECS; local and in-memory storage lose 
 
 ### Local Disk (default)
 
-Stores secrets as JSON files. Mount a volume for persistence.
+Stores secrets as JSON files. Mount a volume for persistence. The directory should be owned by the user Whisper runs as, with mode 700; Whisper warns at startup if others can use it.
 
 ```yaml
 storage_class: whisper.storage.local.local

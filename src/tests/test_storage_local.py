@@ -106,6 +106,61 @@ def test_storage_directory_is_owner_only(backend):
     assert stat.S_IMODE(os.stat(backend.config.path).st_mode) == 0o700
 
 
+def _start(path):
+    b = local()
+    b.config = AttrDict({"path": str(path)})
+    b.start()
+    return b
+
+
+def test_an_existing_private_directory_is_used_quietly(tmp_path, caplog):
+    os.mkdir(tmp_path / "store", 0o700)
+    with caplog.at_level("WARNING"):
+        _start(tmp_path / "store")
+    assert not caplog.records
+
+
+def test_a_directory_others_can_use_is_warned_about(tmp_path, caplog):
+    """e.g. /tmp/whisper created by another user before whisper started."""
+    os.mkdir(tmp_path / "store")
+    os.chmod(tmp_path / "store", 0o777)
+    with caplog.at_level("WARNING"):
+        _start(tmp_path / "store")
+    assert "isn't private" in caplog.text and "777" in caplog.text
+
+
+def test_a_storage_path_that_is_not_a_directory_is_refused(tmp_path):
+    from whisper import ConfigError
+
+    (tmp_path / "store").write_text("")
+    with pytest.raises(ConfigError):
+        _start(tmp_path / "store")
+
+
+def test_a_rewrite_does_not_write_through_a_planted_link(backend, tmp_path):
+    """Another local user who controls the directory could link the
+    predictable temp file to any file whisper can write."""
+    s = _make_secret()
+    backend.set_secret(s)
+    victim = tmp_path / "victim"
+    victim.write_text("keep")
+    os.symlink(victim, os.path.join(backend.config.path, f"{s.id}.json.tmp"))
+    assert backend.modify_secret(s.id, _add_one)[1]
+    assert victim.read_text() == "keep"
+    assert backend.get_secret(s.id).failed_attempts == 1
+    assert os.listdir(backend.config.path) == [f"{s.id}.json"]
+
+
+def test_a_secret_file_is_not_read_through_a_link(backend, tmp_path):
+    import json
+
+    s = _make_secret()
+    elsewhere = tmp_path / "elsewhere.json"
+    elsewhere.write_text(json.dumps(s.__dict__))
+    os.symlink(elsewhere, os.path.join(backend.config.path, f"{s.id}.json"))
+    assert backend.get_secret(s.id) is False
+
+
 def test_failed_attempts_count_atomically(backend):
     import threading
 
