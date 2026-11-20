@@ -220,8 +220,8 @@ def retrieve_secret():
     if s.is_locked(max_failed):
         app.logger.info(f"[{request.remote_addr}] Secret locked: {short_id(s.id)}")
         if s.data or s.hash:
-            # locked by a version before 0.5.1, or the wipe lost a race
-            # with another write
+            # locked by an older version, which didn't wipe or wiped in a
+            # separate write that could fail
             store.wipe_secret(s.id)
         return jsonify({"result": LOCKED})
 
@@ -252,23 +252,20 @@ def retrieve_secret():
 
 def _wrong_password(s, max_failed):
     app.logger.info(f"[{request.remote_addr}] Secret invalid password: {short_id(s.id)}")
-    # never recreates a deleted secret; raises StorageBusy if not counted
-    if max_failed and store.record_failed_attempt(s):
-        if s.failed_attempts >= max_failed:
-            # it can never be opened now, so drop the ciphertext
-            store.wipe_secret(s.id)
-        if s.failed_attempts > max_failed:
-            # Counted after the lock. Answer "locked", as the right password
-            # gets then too, so a guess past the limit can't tell whether it
-            # was right.
-            return jsonify({"result": LOCKED})
+    # The attempt that reaches the limit also wipes the ciphertext, in the
+    # same write. Raises StorageBusy if not counted.
+    if max_failed and not store.record_failed_attempt(s, max_failed):
+        # Locked, read or deleted since s was read, so not counted. Answered
+        # as the right password is then, so a guess past the limit can't
+        # tell whether it was right.
+        return _no_longer_open(s.id, max_failed)
     return jsonify({"result": "Invalid password."})
 
 
 def _no_longer_open(secret_id, max_failed):
-    """The answer when the password was right but the secret was read,
-    locked or deleted since it was first read: "locked" if it's locked, as
-    a wrong password gets then too."""
+    """The answer for a secret that was read, locked or deleted since the
+    request first read it, whether the password was right or wrong:
+    "locked" if it's locked, otherwise "doesn't exist or already viewed"."""
     current = store.get_secret(secret_id)
     if current and current.is_locked(max_failed):
         app.logger.info(f"[{request.remote_addr}] Secret locked: {short_id(secret_id)}")

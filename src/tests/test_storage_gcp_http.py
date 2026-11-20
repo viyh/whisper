@@ -163,13 +163,23 @@ def test_wrong_password_count_after_an_overwrite_mid_read(gcs_backend):
 
 
 def test_wrong_password_count_after_an_overwrite_before_the_write(gcs_backend):
-    """Also a wipe: the count goes on top of it, the ciphertext stays gone."""
+    """Another count got in first: this one goes on top of it."""
+    backend, fake, s = gcs_backend
+    _overwrite_once(fake, "POST", failed_attempts=5)
+    assert _store(backend).record_failed_attempt(s, max_failed_attempts=10) is True
+    assert _stored(fake)["failed_attempts"] == 6
+    assert not any("generation" in query for _, query in fake.log)
+
+
+def test_wrong_password_count_after_a_wipe_before_the_write(gcs_backend):
+    """The secret was locked and wiped meanwhile: nothing more is written,
+    and the ciphertext stays gone."""
     backend, fake, s = gcs_backend
     _overwrite_once(fake, "POST", failed_attempts=10, data="", hash="")
-    assert _store(backend).record_failed_attempt(s) is True
+    assert _store(backend).record_failed_attempt(s, max_failed_attempts=10) is False
     stored = _stored(fake)
-    assert (stored["failed_attempts"], stored["data"], stored["hash"]) == (11, "", "")
-    assert not any("generation" in query for _, query in fake.log)
+    assert (stored["failed_attempts"], stored["data"], stored["hash"]) == (10, "", "")
+    assert [m for m, _ in fake.log].count("POST") == 1  # the one that lost the race
 
 
 def test_wrong_password_count_for_a_deleted_secret(gcs_backend):

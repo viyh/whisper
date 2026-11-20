@@ -100,20 +100,31 @@ class store:
         Returns True if the update was written, False otherwise."""
         return self.backend.update_secret(secret)
 
-    def record_failed_attempt(self, s):
+    def record_failed_attempt(self, s, max_failed_attempts=0):
         """Add a wrong password to the stored failed_attempts count,
-        atomically, so simultaneous wrong passwords each count. Sets
-        s.failed_attempts to the new count. Returns False if the secret is
-        gone. Raises StorageBusy if the count couldn't be written."""
+        atomically, so simultaneous wrong passwords each count. The attempt
+        that reaches max_failed_attempts (0 = no lock) also wipes the
+        ciphertext and auth hash, in the same write: the secret can never be
+        opened now. Sets s.failed_attempts to the new count.
+
+        Returns False, writing nothing, if the stored secret can't be opened
+        any more: locked, wiped (a one-time secret that was read) or gone.
+        Raises StorageBusy if the count couldn't be written."""
 
         def add_one(stored):
+            if stored.is_wiped() or stored.is_locked(max_failed_attempts):
+                return None
             stored.failed_attempts += 1
+            if stored.is_locked(max_failed_attempts):
+                _wipe(stored)
             return stored
 
         _, written = self.backend.modify_secret(s.id, add_one)
         if not written:
             return False
         s.failed_attempts = written.failed_attempts
+        if written.is_wiped():
+            logger.info(f"Wiped locked secret: {short_id(s.id)}")
         return True
 
     def wipe_secret(self, secret_id):
