@@ -16,8 +16,8 @@ responsibly using one of the following methods:
    [Report a vulnerability](../../security/advisories/new) link on this
    repository's Security tab to open a private advisory.
 
-2. **Email**: Contact the maintainer directly at the email listed in the
-   Git commit history.
+2. **GitHub issue or pull request**: Open an [issue](../../issues) or a
+   [pull request](../../pulls) on this repository.
 
 Please include:
 

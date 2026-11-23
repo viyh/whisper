@@ -346,3 +346,14 @@ Joe Richards (GitHub: [@viyh](https://github.com/viyh))
 ## License
 
 [MIT License](LICENSE.md)
+
+Third-party icons, also under the MIT License:
+
+- The show and hide password icons are from
+  [Bootstrap Icons](https://icons.getbootstrap.com/), Copyright (c) The
+  Bootstrap Authors.
+- The copy icon (`clippy.svg`) is from
+  [Octicons](https://github.com/primer/octicons), Copyright (c) GitHub, Inc.
+
+The vendored argon2-browser library comes with its own license, see
+[src/whisper/assets/vendor/README.md](src/whisper/assets/vendor/README.md).

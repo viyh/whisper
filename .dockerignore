@@ -1,3 +1,6 @@
+.git
+.claude/
+config.yaml
 src/config.yaml
 .aws/
 **/__pycache__
